@@ -17,64 +17,29 @@ st.title("📊 DASHBOARD POB IBS BUILDING MANAGEMENT")
 st.markdown("---")
 
 # ==========================================
-# 2. BACA DATA DARI GOOGLE SHEETS & DATA CLEANING
+# 2. BACA DATA LOKAL & DATA CLEANING
 # ==========================================
-SHEET_ID = "1g3Y6GjXUgjWFtKxC9ul8i0vZgHvamkDwT7j4-_95NMk"
-GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+EXCEL_FILE = "data_pobibs.xlsx"
 
-@st.cache_data(ttl=10)
+@st.cache_data
 def load_data():
-    df = pd.read_csv(GSHEET_URL, low_memory=False)
+    df = pd.read_excel(EXCEL_FILE)
+    df.columns = df.columns.astype(str).str.strip()
     
-    # 1. Normalisasi spasi di nama kolom
-    df.columns = [str(col).strip() for col in df.columns]
-    
-    # 2. Mapping nama kolom secara konsisten
-    column_mapping = {}
-    for col in df.columns:
-        c_upper = col.upper().replace('_', ' ').strip()
-        if c_upper == 'NET AMOUNT':
-            column_mapping[col] = 'NET AMOUNT'
-        elif c_upper == 'INVOICE AMOUNT':
-            column_mapping[col] = 'Invoice Amount'
-        elif 'STATUS REIMBURSE' in c_upper or 'STATUS REIMBURSEMENT' in c_upper:
-            column_mapping[col] = 'Status Reimburse Actual'
-        elif c_upper == 'INVOICE AGENT':
-            column_mapping[col] = 'Invoice Agent'
-        elif c_upper == 'STATUS':
-            column_mapping[col] = 'Status'
-            
-    df = df.rename(columns=column_mapping)
-    
-    # 3. Hapus kolom duplikat SETELAH rename agar benar-benar unik
-    df = df.loc[:, ~df.columns.duplicated(keep='first')].copy()
-    
-    # 4. Cleaning khusus pembersihan teks mata uang (Rp, spasi, pemisah ribuan)
-    def clean_currency_to_float(series):
-        if isinstance(series, pd.DataFrame):
-            series = series.iloc[:, 0]
-        return (
-            series.astype(str)
-            .str.replace(r'[^0-9.-]', '', regex=True)
-            .replace('', '0')
-        )
-
-    numeric_cols = ['Invoice Amount', 'NET AMOUNT', 'Amount SAP', 'Amount Paid Based on Setoff Data', 'Amount Actual Paid', 'Amount Paid']
-    for ncol in numeric_cols:
-        if ncol in df.columns:
-            cleaned_series = clean_currency_to_float(df[ncol])
-            df[ncol] = pd.to_numeric(cleaned_series, errors='coerce').fillna(0)
-
-    # Cleaning isi kolom Area
+    # 🛠️ PEMBERSIHAN KOLOM AREA (SERAGAMKAN FORMAT "Area 2")
     if 'Area' in df.columns:
-        df['Area'] = df['Area'].astype(str).str.strip().str.title()
-        
+        df['Area'] = (
+            df['Area']
+            .astype(str)
+            .str.strip()
+            .str.title()
+        )
     return df
 
 try:
     df_raw = load_data()
 except Exception as e:
-    st.error(f"❌ Gagal membaca Google Sheets. Detail: {e}")
+    st.error(f"❌ Gagal membaca file '{EXCEL_FILE}'. Detail: {e}")
     st.stop()
 
 df_filtered = df_raw.copy()
@@ -110,9 +75,9 @@ if 'new regional' in df_filtered.columns:
         df_filtered = df_filtered[df_filtered['new regional'].astype(str) == selected_reg]
 
 # ==========================================
-# FUNGSI HELPER: COMPACT DONUT CHART (KPI)
+# FUNGSI HELPER UTAMA
 # ==========================================
-def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', color_ny='#E53935', element_key=None):
+def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', color_ny='#E53935'):
     total_val = paid_val + ny_val
     pct_done = (paid_val / total_val * 100) if total_val > 0 else 0.0
 
@@ -153,7 +118,7 @@ def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', col
         height=180
     )
 
-    st.plotly_chart(fig, width="stretch", key=element_key)
+    st.plotly_chart(fig, use_container_width=True)
 
     st.markdown(f"""
     <div style='font-size: 11px; text-align: center; color: #555;'>
@@ -161,6 +126,14 @@ def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', col
         NY: <b>Rp {ny_m:,.2f}M</b>
     </div>
     """, unsafe_allow_html=True)
+
+def fmt_rp(val):
+    if abs(val) < 1e-9:
+        return "Rp -"
+    elif val < 0:
+        return f"-Rp {abs(val):,.0f}".replace(",", ".")
+    else:
+        return f"Rp {val:,.0f}".replace(",", ".")
 
 # ==========================================
 # 4. 5 CHART KPI SEJAJAR HORIZONTAL
@@ -180,10 +153,11 @@ with col1:
     df_c1 = df_filtered.copy()
     col_status, col_amt = 'Status', 'Invoice Amount'
     if col_status in df_c1.columns and col_amt in df_c1.columns:
-        mask_paid = df_c1[col_status].astype(str).str.upper().str.strip().str.contains('PAID', na=False)
+        df_c1[col_amt] = pd.to_numeric(df_c1[col_amt], errors='coerce').fillna(0)
+        mask_paid = df_c1[col_status].astype(str).str.upper().str.strip() == 'PAID'
         val_payout_bm = df_c1[mask_paid][col_amt].sum()
         ny_val = df_c1[~mask_paid][col_amt].sum()
-        create_compact_donut_card("Total Payout to BM", val_payout_bm, ny_val, element_key="kpi_payout_bm")
+        create_compact_donut_card("Total Payout to BM", val_payout_bm, ny_val)
     else:
         st.warning("Kolom N/A")
 
@@ -192,10 +166,11 @@ with col2:
     df_c2 = df_filtered.copy()
     col_status, col_amt = 'Status', 'NET AMOUNT'
     if col_status in df_c2.columns and col_amt in df_c2.columns:
-        mask_paid = df_c2[col_status].astype(str).str.upper().str.strip().str.contains('PAID', na=False)
+        df_c2[col_amt] = pd.to_numeric(df_c2[col_amt], errors='coerce').fillna(0)
+        mask_paid = df_c2[col_status].astype(str).str.upper().str.strip() == 'PAID'
         val_huawei_agent = df_c2[mask_paid][col_amt].sum()
         ny_val = df_c2[~mask_paid][col_amt].sum()
-        create_compact_donut_card("Huawei To Agent", val_huawei_agent, ny_val, element_key="kpi_huawei_agent")
+        create_compact_donut_card("Huawei To Agent", val_huawei_agent, ny_val)
     else:
         st.warning("Kolom N/A")
 
@@ -204,12 +179,13 @@ with col3:
     df_c3 = df_filtered.copy()
     col_status, col_amt, col_inv = 'Status', 'NET AMOUNT', 'Invoice Agent'
     if col_inv in df_c3.columns:
-        df_c3 = df_c3[df_c3[col_inv].astype(str).str.upper().str.strip().str.contains('DONE', na=False)]
+        df_c3 = df_c3[df_c3[col_inv].astype(str).str.upper().str.strip() == 'INVOICE DONE']
     if col_status in df_c3.columns and col_amt in df_c3.columns:
-        mask_paid = df_c3[col_status].astype(str).str.upper().str.strip().str.contains('PAID', na=False)
+        df_c3[col_amt] = pd.to_numeric(df_c3[col_amt], errors='coerce').fillna(0)
+        mask_paid = df_c3[col_status].astype(str).str.upper().str.strip() == 'PAID'
         val_agent_tsel = df_c3[mask_paid][col_amt].sum()
         ny_val = df_c3[~mask_paid][col_amt].sum()
-        create_compact_donut_card("Agent To Telkomsel", val_agent_tsel, ny_val, element_key="kpi_agent_tsel")
+        create_compact_donut_card("Agent To Telkomsel", val_agent_tsel, ny_val)
     else:
         st.warning("Kolom N/A")
 
@@ -218,27 +194,34 @@ with col4:
     df_c4 = df_filtered.copy()
     col_status, col_amt = 'Status Reimburse Actual', 'NET AMOUNT'
     if col_status in df_c4.columns and col_amt in df_c4.columns:
+        df_c4[col_amt] = pd.to_numeric(df_c4[col_amt], errors='coerce').fillna(0)
         status_clean = df_c4[col_status].astype(str).str.upper().str.strip()
-        mask_done = status_clean.str.contains('PAID|DN ISSUED', regex=True, na=False)
+        mask_done = status_clean.isin(['PAID', 'DN ISSUED'])
         val_dn_issued = df_c4[mask_done][col_amt].sum()
         ny_val = df_c4[~mask_done][col_amt].sum()
-        create_compact_donut_card("DN Issued", val_dn_issued, ny_val, element_key="kpi_dn_issued")
+        create_compact_donut_card("DN Issued", val_dn_issued, ny_val)
     else:
         st.warning("Kolom N/A")
 
 # 5. Total Pay In To Huawei
 with col5:
     df_c5 = df_filtered.copy()
-    col_status, col_amt = 'Status Reimburse Actual', 'NET AMOUNT'
+    col_status = 'Status Reimburse Actual'
+    col_amt = 'NET AMOUNT'
+    
     if col_status in df_c5.columns and col_amt in df_c5.columns:
+        df_c5[col_amt] = pd.to_numeric(df_c5[col_amt], errors='coerce').fillna(0)
         status_clean = df_c5[col_status].astype(str).str.upper().str.strip()
-        mask_paid = status_clean.str.contains('PAID', na=False)
+        
+        mask_paid = status_clean == 'PAID'
         val_payin_huawei = df_c5[mask_paid][col_amt].sum()
-        mask_ny = status_clean.str.contains('DN', na=False) & ~mask_paid
+        
+        mask_ny = status_clean.isin(['DN ISSUED', 'NY ISSUE DN'])
         ny_val = df_c5[mask_ny][col_amt].sum()
-        create_compact_donut_card("Total Pay In To Huawei", val_payin_huawei, ny_val, element_key="kpi_payin_huawei")
+        
+        create_compact_donut_card("Total Pay In To Huawei", val_payin_huawei, ny_val)
     else:
-        st.warning("Kolom N/A")
+        st.warning("Kolom Status Reimburse Actual / NET AMOUNT N/A")
 
 st.markdown("---")
 
@@ -252,6 +235,7 @@ col_amount = 'Invoice Amount'
 
 if col_status in df_filtered.columns and col_amount in df_filtered.columns:
     df_status_calc = df_filtered.copy()
+    df_status_calc[col_amount] = pd.to_numeric(df_status_calc[col_amount], errors='coerce').fillna(0)
 
     target_statuses = [
         "MODIFY REQUEST",
@@ -433,7 +417,7 @@ if 'Area' in df_filtered.columns:
     raw_unique_areas = df_filtered['Area'].dropna().unique().tolist()
     unique_areas = sorted([str(x) for x in raw_unique_areas if str(x).lower() != 'nan'])
     
-    def draw_area_donut(title, done_bn, ny_bn, color_main, element_key=None):
+    def draw_area_donut(title, done_bn, ny_bn, color_main):
         total_bn = done_bn + ny_bn
         pct_done = (done_bn / total_bn * 100) if total_bn > 0 else 0.0
         
@@ -466,7 +450,7 @@ if 'Area' in df_filtered.columns:
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'
         )
-        st.plotly_chart(fig, width="stretch", key=element_key)
+        st.plotly_chart(fig, use_container_width=True)
         
         st.markdown(f"""
             <div style='text-align: center; font-size: 11px; font-weight: bold; color: #222; margin-top: -10px;'>
@@ -493,8 +477,8 @@ if 'Area' in df_filtered.columns:
             
             col_amt_payout = 'Invoice Amount' if 'Invoice Amount' in df_area.columns else 'NET AMOUNT'
             if 'Status' in df_area.columns and col_amt_payout in df_area.columns:
-                payout_series = df_area[col_amt_payout]
-                mask_payout_done = df_area['Status'].astype(str).str.upper().str.strip().str.contains('PAID', na=False)
+                payout_series = pd.to_numeric(df_area[col_amt_payout], errors='coerce').fillna(0)
+                mask_payout_done = df_area['Status'].astype(str).str.upper().str.strip() == 'PAID'
                 payout_done_bn = payout_series[mask_payout_done].sum() / 1_000_000_000
                 payout_ny_bn = payout_series[~mask_payout_done].sum() / 1_000_000_000
             else:
@@ -502,11 +486,11 @@ if 'Area' in df_filtered.columns:
 
             col_amt_payin = 'NET AMOUNT'
             if 'Status Reimburse Actual' in df_area.columns and col_amt_payin in df_area.columns:
-                payin_series = df_area[col_amt_payin]
+                payin_series = pd.to_numeric(df_area[col_amt_payin], errors='coerce').fillna(0)
                 status_area_clean = df_area['Status Reimburse Actual'].astype(str).str.upper().str.strip()
                 
-                mask_payin_done = status_area_clean.str.contains('PAID', na=False)
-                mask_payin_ny = status_area_clean.str.contains('DN', na=False) & ~mask_payin_done
+                mask_payin_done = status_area_clean == 'PAID'
+                mask_payin_ny = status_area_clean.isin(['DN ISSUED', 'NY ISSUE DN'])
                 
                 payin_done_bn = payin_series[mask_payin_done].sum() / 1_000_000_000
                 payin_ny_bn = payin_series[mask_payin_ny].sum() / 1_000_000_000
@@ -514,11 +498,10 @@ if 'Area' in df_filtered.columns:
                 payin_done_bn, payin_ny_bn = 0.0, 0.0
 
             c_payout, c_payin = st.columns(2)
-            clean_area_key = str(area_name).replace(" ", "_").lower()
             with c_payout:
-                draw_area_donut(f"Progress Payout {area_name}", payout_done_bn, payout_ny_bn, color_main='#70AD47', element_key=f"area_payout_{clean_area_key}")
+                draw_area_donut(f"Progress Payout {area_name}", payout_done_bn, payout_ny_bn, color_main='#70AD47')
             with c_payin:
-                draw_area_donut(f"Progress Payin {area_name}", payin_done_bn, payin_ny_bn, color_main='#ED7D31', element_key=f"area_payin_{clean_area_key}")
+                draw_area_donut(f"Progress Payin {area_name}", payin_done_bn, payin_ny_bn, color_main='#ED7D31')
             
             st.markdown("<br>", unsafe_allow_html=True)
             
@@ -543,13 +526,15 @@ if col_inv_agent in df_raw.columns:
     selected_inv_agent = st.selectbox("Filter Invoice Agent", options=list_inv_agent, index=0)
     
     if selected_inv_agent != "(All)":
-        df_inv_reg = df_inv_reg[df_inv_reg[col_inv_agent].astype(str).str.upper().str.strip().str.contains(selected_inv_agent.upper().strip(), na=False)]
+        df_inv_reg = df_inv_reg[df_inv_reg[col_inv_agent].astype(str).str.upper().str.strip() == selected_inv_agent.upper().strip()]
 
 col_reg = 'new regional'
 col_status_sap = 'StatusSAP'
 col_net_amt = 'NET AMOUNT'
 
 if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and col_net_amt in df_inv_reg.columns:
+    df_inv_reg[col_net_amt] = pd.to_numeric(df_inv_reg[col_net_amt], errors='coerce').fillna(0)
+    
     target_order = [
         "R03_Jakarta Banten",
         "R12_Eastern Jabotabek",
@@ -599,7 +584,7 @@ if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and co
             df_reg = df_inv_reg[df_inv_reg[col_reg].astype(str) == reg_name]
             status_sap_clean = df_reg[col_status_sap].astype(str).str.upper().str.strip()
             
-            mask_done = status_sap_clean.str.contains('CLEAR|PAID', regex=True, na=False)
+            mask_done = status_sap_clean.isin(['CLEARED', 'PAID', 'CLEARED/PAID'])
             done_val = df_reg[mask_done][col_net_amt].sum()
             done_m = done_val / 1_000_000_000
             
@@ -643,8 +628,7 @@ if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and co
                     plot_bgcolor='rgba(0,0,0,0)'
                 )
                 
-                clean_reg_key = str(reg_name).replace(" ", "_").replace("-", "_").lower()
-                st.plotly_chart(fig, width="stretch", key=f"regional_chart_{clean_reg_key}_{idx}")
+                st.plotly_chart(fig, use_container_width=True)
                 st.markdown("<br>", unsafe_allow_html=True)
                 
         st.markdown("</div>", unsafe_allow_html=True)
@@ -654,26 +638,39 @@ else:
 st.markdown("---")
 
 # ==========================================
-# 9. PROCESS REIMBURSEMENT SUMMARY TABLE
+# 9. PROCESS REIMBURSEMENT SUMMARY TABLE (BERWARNA)
 # ==========================================
 st.subheader("📊 Process Reimbursement Summary")
 
 def generate_reimbursement_summary_table(df):
     df_calc = df.copy()
 
+    # 1. Bersihkan & Petakan Kolom Numerik
+    num_cols = ['NET AMOUNT', 'Amount SAP', 'Amount Paid Based on Setoff Data', 'Amount Paid']
+    for col in num_cols:
+        if col == 'Amount Paid' and col not in df_calc.columns and 'Amount Actual Paid' in df_calc.columns:
+            df_calc['Amount Paid'] = pd.to_numeric(df_calc['Amount Actual Paid'], errors='coerce').fillna(0)
+        elif col in df_calc.columns:
+            df_calc[col] = pd.to_numeric(df_calc[col], errors='coerce').fillna(0)
+        else:
+            df_calc[col] = 0
+
+    # 2. Filter Khusus Kolom Amount SAP berdasarkan Status SAP
     col_status_sap = 'StatusSAP' if 'StatusSAP' in df_calc.columns else ('Status SAP' if 'Status SAP' in df_calc.columns else None)
     if col_status_sap:
         sap_status_clean = df_calc[col_status_sap].astype(str).str.upper().str.strip()
-        mask_sap_cleared = sap_status_clean.str.contains('CLEAR|PAID', regex=True, na=False)
+        mask_sap_cleared = sap_status_clean.isin(['CLEARED', 'PAID', 'CLEARED/PAID'])
         df_calc['Amount SAP Filtered'] = np.where(mask_sap_cleared, df_calc['Amount SAP'], 0)
     else:
         df_calc['Amount SAP Filtered'] = df_calc['Amount SAP']
 
+    # 3. Identifikasi Kolom Payment Month
     col_m = 'Payment Month' if 'Payment Month' in df_calc.columns else ('Month' if 'Month' in df_calc.columns else 'Periode Month')
     if col_m not in df_calc.columns:
         st.warning("Kolom Payment Month tidak ditemukan.")
         return pd.DataFrame(), col_m
 
+    # 4. GroupBy berdasarkan Rows
     summary = df_calc.groupby(col_m, as_index=False, dropna=False).agg({
         'NET AMOUNT': 'sum',
         'Amount SAP Filtered': 'sum',
@@ -681,6 +678,7 @@ def generate_reimbursement_summary_table(df):
         'Amount Paid': 'sum'
     })
 
+    # 5. Pengurutan Kronologis Payment Month
     summary['date_parsed'] = pd.to_datetime(summary[col_m].astype(str), format='%b-%y', errors='coerce')
     valid_dates = summary[summary['date_parsed'].notna()].sort_values('date_parsed', ascending=True)
     invalid_dates = summary[summary['date_parsed'].isna()]
@@ -688,8 +686,10 @@ def generate_reimbursement_summary_table(df):
     summary = pd.concat([valid_dates, invalid_dates], ignore_index=True)
     summary = summary.drop(columns=['date_parsed'])
 
+    # 6. Hitung GAP
     summary['GAP'] = summary['NET AMOUNT'] - summary['Amount Paid Based on Setoff Data']
 
+    # 7. Baris Grand Total
     grand_total = pd.DataFrame([{
         col_m: 'Grand Total',
         'NET AMOUNT': summary['NET AMOUNT'].sum(),
@@ -703,17 +703,10 @@ def generate_reimbursement_summary_table(df):
 
     return summary_final, col_m
 
+# Menghasilkan Dataframe Raw
 df_summary_raw, col_month_name = generate_reimbursement_summary_table(df_filtered)
 
 if not df_summary_raw.empty:
-    def fmt_rp(val):
-        if abs(val) < 1e-9:
-            return "Rp -"
-        elif val < 0:
-            return f"-Rp {abs(val):,.0f}".replace(",", ".")
-        else:
-            return f"Rp {val:,.0f}".replace(",", ".")
-
     rows_html = ""
     for idx, row in df_summary_raw.iterrows():
         val_m = row[col_month_name]
@@ -743,33 +736,496 @@ if not df_summary_raw.empty:
         body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: transparent; }}
         .process-table {{ width: 100%; border-collapse: collapse; font-size: 11px; color: #000000; }}
         .process-table th, .process-table td {{ border: 1px solid #7f7f7f; padding: 5px 8px; white-space: nowrap; }}
-        .process-table th {{ background-color: #d9e1f2; font-weight: bold; text-align: center; }}
+        
+        .hdr-month {{ background-color: #d9e1f2; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .hdr-blue {{ background-color: #b4c6e7; font-weight: bold; text-align: center; vertical-align: middle; }}
+        
+        .row-total {{ font-weight: bold; background-color: #b4c6e7; }}
+        .row-even {{ background-color: #ffffff; }}
+        .row-odd {{ background-color: #f2f2f2; }}
+        
         .align-center {{ text-align: center; }}
         .align-right {{ text-align: right; }}
         .col-bold {{ font-weight: bold; }}
-        .row-even {{ background-color: #ffffff; }}
-        .row-odd {{ background-color: #f2f2f2; }}
-        .row-total {{ background-color: #d9e1f2; font-weight: bold; }}
     </style>
     </head>
     <body>
-    <table class="process-table">
-        <thead>
-            <tr>
-                <th>Payment Month</th>
-                <th>NET AMOUNT</th>
-                <th>Amount SAP</th>
-                <th>Amount Paid Setoff</th>
-                <th>Amount Paid</th>
-                <th>GAP</th>
-            </tr>
-        </thead>
-        <tbody>
-            {rows_html}
-        </tbody>
-    </table>
+    <div style="overflow-x: auto;">
+        <table class="process-table">
+            <thead>
+                <tr>
+                    <th class="hdr-month" style="width: 120px;">Payment Month</th>
+                    <th class="hdr-blue">Sum of NET AMOUNT</th>
+                    <th class="hdr-blue">Sum of Amount SAP</th>
+                    <th class="hdr-blue">Sum of Amount Paid Based on Setoff Data</th>
+                    <th class="hdr-blue">Sum of Amount Paid</th>
+                    <th class="hdr-blue">GAP</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+    </div>
     </body>
     </html>
     """
 
-    components.html(full_html, height=350, scrolling=True)
+    calc_height = min(600, max(180, len(df_summary_raw) * 28 + 45))
+    components.html(full_html, height=calc_height, scrolling=True)
+
+st.markdown("---")
+
+# ==========================================
+# 10. REIMBURSEMENT SUMMARY TO TSEL & AGENT
+# ==========================================
+st.subheader("📑 Reimbursement Summary to TSEL & Agent")
+
+def generate_reimbursement_tsel_agent(df):
+    df_calc = df.copy()
+    col_m = 'Payment Month' if 'Payment Month' in df_calc.columns else ('Month' if 'Month' in df_calc.columns else 'Periode Month')
+    
+    cols = ['NET AMOUNT', 'Invoice Done (Submit Tsel)', 'Outstanding Invoice Agent', 'Not Yet Submitted Agent']
+    for c in cols:
+        if c in df_calc.columns:
+            df_calc[c] = pd.to_numeric(df_calc[c], errors='coerce').fillna(0)
+        else:
+            df_calc[c] = 0
+
+    summary = df_calc.groupby(col_m, as_index=False, dropna=False).agg({
+        'NET AMOUNT': 'sum',
+        'Invoice Done (Submit Tsel)': 'sum',
+        'Outstanding Invoice Agent': 'sum',
+        'Not Yet Submitted Agent': 'sum'
+    })
+
+    summary['date_parsed'] = pd.to_datetime(summary[col_m].astype(str), format='%b-%y', errors='coerce')
+    valid = summary[summary['date_parsed'].notna()].sort_values('date_parsed', ascending=True)
+    invalid = summary[summary['date_parsed'].isna()]
+    summary = pd.concat([valid, invalid], ignore_index=True).drop(columns=['date_parsed'])
+
+    grand_total = pd.DataFrame([{
+        col_m: 'Grand Total',
+        'NET AMOUNT': summary['NET AMOUNT'].sum(),
+        'Invoice Done (Submit Tsel)': summary['Invoice Done (Submit Tsel)'].sum(),
+        'Outstanding Invoice Agent': summary['Outstanding Invoice Agent'].sum(),
+        'Not Yet Submitted Agent': summary['Not Yet Submitted Agent'].sum()
+    }])
+
+    return pd.concat([summary, grand_total], ignore_index=True), col_m
+
+df_tsel_agent, col_m_tsel = generate_reimbursement_tsel_agent(df_filtered)
+
+if not df_tsel_agent.empty:
+    rows_tsel = ""
+    for idx, row in df_tsel_agent.iterrows():
+        val_m = row[col_m_tsel]
+        is_total = (val_m == 'Grand Total')
+        if pd.isna(val_m) or str(val_m).strip().lower() in ['nan', 'none', '']: val_m = "(blank)"
+        
+        row_class = "row-total" if is_total else ("row-even" if idx % 2 == 0 else "row-odd")
+        rows_tsel += f"""
+        <tr class="{row_class}">
+            <td class="align-center">{val_m}</td>
+            <td class="align-right col-bold">{fmt_rp(row['NET AMOUNT'])}</td>
+            <td class="align-right">{fmt_rp(row['Invoice Done (Submit Tsel)'])}</td>
+            <td class="align-right">{fmt_rp(row['Outstanding Invoice Agent'])}</td>
+            <td class="align-right">{fmt_rp(row['Not Yet Submitted Agent'])}</td>
+        </tr>
+        """
+
+    html_tsel = f"""
+    <!DOCTYPE html><html><head><style>
+        body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: transparent; }}
+        .process-table {{ width: 100%; border-collapse: collapse; font-size: 11px; color: #000000; }}
+        .process-table th, .process-table td {{ border: 1px solid #7f7f7f; padding: 5px 8px; white-space: nowrap; }}
+        .hdr-month {{ background-color: #d9e1f2; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .hdr-green {{ background-color: #c6e0b4; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .row-total {{ font-weight: bold; background-color: #c6e0b4; }}
+        .row-even {{ background-color: #ffffff; }}
+        .row-odd {{ background-color: #f2f2f2; }}
+        .align-center {{ text-align: center; }}
+        .align-right {{ text-align: right; }}
+        .col-bold {{ font-weight: bold; }}
+    </style></head><body>
+    <div style="overflow-x: auto;">
+        <table class="process-table">
+            <thead>
+                <tr>
+                    <th class="hdr-month" style="width: 120px;">Payment Month</th>
+                    <th class="hdr-green">Sum of NET AMOUNT</th>
+                    <th class="hdr-green">Invoice Done (Submit Tsel)</th>
+                    <th class="hdr-green">Outstanding Invoice Agent</th>
+                    <th class="hdr-green">Not Yet Submitted Agent</th>
+                </tr>
+            </thead>
+            <tbody>{rows_tsel}</tbody>
+        </table>
+    </div></body></html>
+    """
+    components.html(html_tsel, height=min(500, max(180, len(df_tsel_agent) * 28 + 45)), scrolling=True)
+
+st.markdown("---")
+
+# ==========================================
+# 11. RISK VAT HUAWEI SUMMARY
+# ==========================================
+st.subheader("⚠️ Risk VAT Huawei Summary")
+
+def generate_risk_vat(df):
+    df_calc = df.copy()
+    col_m = 'Payment Month' if 'Payment Month' in df_calc.columns else ('Month' if 'Month' in df_calc.columns else 'Periode Month')
+    
+    cols = ['VAT Amount', 'Risk VAT (Over 3 Months)', 'Safe VAT']
+    for c in cols:
+        if c in df_calc.columns:
+            df_calc[c] = pd.to_numeric(df_calc[c], errors='coerce').fillna(0)
+        else:
+            df_calc[c] = 0
+
+    summary = df_calc.groupby(col_m, as_index=False, dropna=False).agg({
+        'VAT Amount': 'sum',
+        'Risk VAT (Over 3 Months)': 'sum',
+        'Safe VAT': 'sum'
+    })
+
+    summary['date_parsed'] = pd.to_datetime(summary[col_m].astype(str), format='%b-%y', errors='coerce')
+    valid = summary[summary['date_parsed'].notna()].sort_values('date_parsed', ascending=True)
+    invalid = summary[summary['date_parsed'].isna()]
+    summary = pd.concat([valid, invalid], ignore_index=True).drop(columns=['date_parsed'])
+
+    grand_total = pd.DataFrame([{
+        col_m: 'Grand Total',
+        'VAT Amount': summary['VAT Amount'].sum(),
+        'Risk VAT (Over 3 Months)': summary['Risk VAT (Over 3 Months)'].sum(),
+        'Safe VAT': summary['Safe VAT'].sum()
+    }])
+
+    return pd.concat([summary, grand_total], ignore_index=True), col_m
+
+df_risk_vat, col_m_vat = generate_risk_vat(df_filtered)
+
+if not df_risk_vat.empty:
+    rows_vat = ""
+    for idx, row in df_risk_vat.iterrows():
+        val_m = row[col_m_vat]
+        is_total = (val_m == 'Grand Total')
+        if pd.isna(val_m) or str(val_m).strip().lower() in ['nan', 'none', '']: val_m = "(blank)"
+        
+        row_class = "row-total" if is_total else ("row-even" if idx % 2 == 0 else "row-odd")
+        rows_vat += f"""
+        <tr class="{row_class}">
+            <td class="align-center">{val_m}</td>
+            <td class="align-right col-bold">{fmt_rp(row['VAT Amount'])}</td>
+            <td class="align-right text-red">{fmt_rp(row['Risk VAT (Over 3 Months)'])}</td>
+            <td class="align-right">{fmt_rp(row['Safe VAT'])}</td>
+        </tr>
+        """
+
+    html_vat = f"""
+    <!DOCTYPE html><html><head><style>
+        body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: transparent; }}
+        .process-table {{ width: 100%; border-collapse: collapse; font-size: 11px; color: #000000; }}
+        .process-table th, .process-table td {{ border: 1px solid #7f7f7f; padding: 5px 8px; white-space: nowrap; }}
+        .hdr-month {{ background-color: #d9e1f2; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .hdr-red {{ background-color: #fce4d6; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .row-total {{ font-weight: bold; background-color: #fce4d6; }}
+        .row-even {{ background-color: #ffffff; }}
+        .row-odd {{ background-color: #f2f2f2; }}
+        .align-center {{ text-align: center; }}
+        .align-right {{ text-align: right; }}
+        .col-bold {{ font-weight: bold; }}
+        .text-red {{ color: #c00000; font-weight: bold; }}
+    </style></head><body>
+    <div style="overflow-x: auto;">
+        <table class="process-table">
+            <thead>
+                <tr>
+                    <th class="hdr-month" style="width: 120px;">Payment Month</th>
+                    <th class="hdr-red">Sum of VAT Amount</th>
+                    <th class="hdr-red">Risk VAT (Over 3 Months)</th>
+                    <th class="hdr-red">Safe VAT</th>
+                </tr>
+            </thead>
+            <tbody>{rows_vat}</tbody>
+        </table>
+    </div></body></html>
+    """
+    components.html(html_vat, height=min(500, max(180, len(df_risk_vat) * 28 + 45)), scrolling=True)
+
+st.markdown("---")
+
+# ==========================================
+# 12. MANAGEMENT FEE PROCESS
+# ==========================================
+st.subheader("💼 Management Fee Process")
+
+def generate_mgmt_fee(df):
+    df_calc = df.copy()
+    col_m = 'Payment Month' if 'Payment Month' in df_calc.columns else ('Month' if 'Month' in df_calc.columns else 'Periode Month')
+    
+    cols = ['Management Fee Value', 'MF Invoiced', 'MF Outstanding']
+    for c in cols:
+        if c in df_calc.columns:
+            df_calc[c] = pd.to_numeric(df_calc[c], errors='coerce').fillna(0)
+        else:
+            df_calc[c] = 0
+
+    summary = df_calc.groupby(col_m, as_index=False, dropna=False).agg({
+        'Management Fee Value': 'sum',
+        'MF Invoiced': 'sum',
+        'MF Outstanding': 'sum'
+    })
+
+    summary['date_parsed'] = pd.to_datetime(summary[col_m].astype(str), format='%b-%y', errors='coerce')
+    valid = summary[summary['date_parsed'].notna()].sort_values('date_parsed', ascending=True)
+    invalid = summary[summary['date_parsed'].isna()]
+    summary = pd.concat([valid, invalid], ignore_index=True).drop(columns=['date_parsed'])
+
+    grand_total = pd.DataFrame([{
+        col_m: 'Grand Total',
+        'Management Fee Value': summary['Management Fee Value'].sum(),
+        'MF Invoiced': summary['MF Invoiced'].sum(),
+        'MF Outstanding': summary['MF Outstanding'].sum()
+    }])
+
+    return pd.concat([summary, grand_total], ignore_index=True), col_m
+
+df_mgmt_fee, col_m_mf = generate_mgmt_fee(df_filtered)
+
+if not df_mgmt_fee.empty:
+    rows_mf = ""
+    for idx, row in df_mgmt_fee.iterrows():
+        val_m = row[col_m_mf]
+        is_total = (val_m == 'Grand Total')
+        if pd.isna(val_m) or str(val_m).strip().lower() in ['nan', 'none', '']: val_m = "(blank)"
+        
+        row_class = "row-total" if is_total else ("row-even" if idx % 2 == 0 else "row-odd")
+        rows_mf += f"""
+        <tr class="{row_class}">
+            <td class="align-center">{val_m}</td>
+            <td class="align-right col-bold">{fmt_rp(row['Management Fee Value'])}</td>
+            <td class="align-right">{fmt_rp(row['MF Invoiced'])}</td>
+            <td class="align-right">{fmt_rp(row['MF Outstanding'])}</td>
+        </tr>
+        """
+
+    html_mf = f"""
+    <!DOCTYPE html><html><head><style>
+        body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: transparent; }}
+        .process-table {{ width: 100%; border-collapse: collapse; font-size: 11px; color: #000000; }}
+        .process-table th, .process-table td {{ border: 1px solid #7f7f7f; padding: 5px 8px; white-space: nowrap; }}
+        .hdr-month {{ background-color: #d9e1f2; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .hdr-yellow {{ background-color: #fff2cc; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .row-total {{ font-weight: bold; background-color: #fff2cc; }}
+        .row-even {{ background-color: #ffffff; }}
+        .row-odd {{ background-color: #f2f2f2; }}
+        .align-center {{ text-align: center; }}
+        .align-right {{ text-align: right; }}
+        .col-bold {{ font-weight: bold; }}
+    </style></head><body>
+    <div style="overflow-x: auto;">
+        <table class="process-table">
+            <thead>
+                <tr>
+                    <th class="hdr-month" style="width: 120px;">Payment Month</th>
+                    <th class="hdr-yellow">Management Fee Value</th>
+                    <th class="hdr-yellow">MF Invoiced</th>
+                    <th class="hdr-yellow">MF Outstanding</th>
+                </tr>
+            </thead>
+            <tbody>{rows_mf}</tbody>
+        </table>
+    </div></body></html>
+    """
+    components.html(html_mf, height=min(500, max(180, len(df_mgmt_fee) * 28 + 45)), scrolling=True)
+
+st.markdown("---")
+
+# ==========================================
+# 13. STATUS REJECTION SAP
+# ==========================================
+st.subheader("❌ Status Rejection SAP")
+
+def generate_rejection_sap(df):
+    df_calc = df.copy()
+    col_m = 'Payment Month' if 'Payment Month' in df_calc.columns else ('Month' if 'Month' in df_calc.columns else 'Periode Month')
+    
+    col_status_sap = 'StatusSAP' if 'StatusSAP' in df_calc.columns else ('Status SAP' if 'Status SAP' in df_calc.columns else None)
+    col_amt = 'NET AMOUNT' if 'NET AMOUNT' in df_calc.columns else 'Invoice Amount'
+
+    if col_amt in df_calc.columns:
+        df_calc[col_amt] = pd.to_numeric(df_calc[col_amt], errors='coerce').fillna(0)
+    else:
+        df_calc[col_amt] = 0
+
+    if col_status_sap and col_status_sap in df_calc.columns:
+        mask_rejected = df_calc[col_status_sap].astype(str).str.upper().str.contains('REJECT', na=False)
+        df_calc['Rejected Amount'] = np.where(mask_rejected, df_calc[col_amt], 0)
+        df_calc['Non-Rejected Amount'] = np.where(~mask_rejected, df_calc[col_amt], 0)
+    else:
+        df_calc['Rejected Amount'] = 0
+        df_calc['Non-Rejected Amount'] = df_calc[col_amt]
+
+    summary = df_calc.groupby(col_m, as_index=False, dropna=False).agg({
+        col_amt: 'sum',
+        'Rejected Amount': 'sum',
+        'Non-Rejected Amount': 'sum'
+    })
+
+    summary['date_parsed'] = pd.to_datetime(summary[col_m].astype(str), format='%b-%y', errors='coerce')
+    valid = summary[summary['date_parsed'].notna()].sort_values('date_parsed', ascending=True)
+    invalid = summary[summary['date_parsed'].isna()]
+    summary = pd.concat([valid, invalid], ignore_index=True).drop(columns=['date_parsed'])
+
+    grand_total = pd.DataFrame([{
+        col_m: 'Grand Total',
+        col_amt: summary[col_amt].sum(),
+        'Rejected Amount': summary['Rejected Amount'].sum(),
+        'Non-Rejected Amount': summary['Non-Rejected Amount'].sum()
+    }])
+
+    return pd.concat([summary, grand_total], ignore_index=True), col_m, col_amt
+
+df_rejection, col_m_rej, col_amt_rej = generate_rejection_sap(df_filtered)
+
+if not df_rejection.empty:
+    rows_rej = ""
+    for idx, row in df_rejection.iterrows():
+        val_m = row[col_m_rej]
+        is_total = (val_m == 'Grand Total')
+        if pd.isna(val_m) or str(val_m).strip().lower() in ['nan', 'none', '']: val_m = "(blank)"
+        
+        row_class = "row-total" if is_total else ("row-even" if idx % 2 == 0 else "row-odd")
+        rows_rej += f"""
+        <tr class="{row_class}">
+            <td class="align-center">{val_m}</td>
+            <td class="align-right col-bold">{fmt_rp(row[col_amt_rej])}</td>
+            <td class="align-right text-red">{fmt_rp(row['Rejected Amount'])}</td>
+            <td class="align-right">{fmt_rp(row['Non-Rejected Amount'])}</td>
+        </tr>
+        """
+
+    html_rej = f"""
+    <!DOCTYPE html><html><head><style>
+        body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: transparent; }}
+        .process-table {{ width: 100%; border-collapse: collapse; font-size: 11px; color: #000000; }}
+        .process-table th, .process-table td {{ border: 1px solid #7f7f7f; padding: 5px 8px; white-space: nowrap; }}
+        .hdr-month {{ background-color: #d9e1f2; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .hdr-orange {{ background-color: #fce4d6; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .row-total {{ font-weight: bold; background-color: #fce4d6; }}
+        .row-even {{ background-color: #ffffff; }}
+        .row-odd {{ background-color: #f2f2f2; }}
+        .align-center {{ text-align: center; }}
+        .align-right {{ text-align: right; }}
+        .col-bold {{ font-weight: bold; }}
+        .text-red {{ color: #c00000; font-weight: bold; }}
+    </style></head><body>
+    <div style="overflow-x: auto;">
+        <table class="process-table">
+            <thead>
+                <tr>
+                    <th class="hdr-month" style="width: 120px;">Payment Month</th>
+                    <th class="hdr-orange">Total Amount</th>
+                    <th class="hdr-orange">SAP Rejected Amount</th>
+                    <th class="hdr-orange">SAP Normal / Cleared</th>
+                </tr>
+            </thead>
+            <tbody>{rows_rej}</tbody>
+        </table>
+    </div></body></html>
+    """
+    components.html(html_rej, height=min(500, max(180, len(df_rejection) * 28 + 45)), scrolling=True)
+
+st.markdown("---")
+
+# ==========================================
+# 14. STATUS TRACKING INVOICE BM
+# ==========================================
+st.subheader("🔍 Status Tracking Invoice BM")
+
+def generate_tracking_bm(df):
+    df_calc = df.copy()
+    col_m = 'Payment Month' if 'Payment Month' in df_calc.columns else ('Month' if 'Month' in df_calc.columns else 'Periode Month')
+    
+    cols = ['Invoice Amount', 'BM Invoiced', 'BM Paid', 'BM Outstanding']
+    for c in cols:
+        if c in df_calc.columns:
+            df_calc[c] = pd.to_numeric(df_calc[c], errors='coerce').fillna(0)
+        else:
+            df_calc[c] = 0
+
+    summary = df_calc.groupby(col_m, as_index=False, dropna=False).agg({
+        'Invoice Amount': 'sum',
+        'BM Invoiced': 'sum',
+        'BM Paid': 'sum',
+        'BM Outstanding': 'sum'
+    })
+
+    summary['date_parsed'] = pd.to_datetime(summary[col_m].astype(str), format='%b-%y', errors='coerce')
+    valid = summary[summary['date_parsed'].notna()].sort_values('date_parsed', ascending=True)
+    invalid = summary[summary['date_parsed'].isna()]
+    summary = pd.concat([valid, invalid], ignore_index=True).drop(columns=['date_parsed'])
+
+    grand_total = pd.DataFrame([{
+        col_m: 'Grand Total',
+        'Invoice Amount': summary['Invoice Amount'].sum(),
+        'BM Invoiced': summary['BM Invoiced'].sum(),
+        'BM Paid': summary['BM Paid'].sum(),
+        'BM Outstanding': summary['BM Outstanding'].sum()
+    }])
+
+    return pd.concat([summary, grand_total], ignore_index=True), col_m
+
+df_tracking_bm, col_m_bm = generate_tracking_bm(df_filtered)
+
+if not df_tracking_bm.empty:
+    rows_bm = ""
+    for idx, row in df_tracking_bm.iterrows():
+        val_m = row[col_m_bm]
+        is_total = (val_m == 'Grand Total')
+        if pd.isna(val_m) or str(val_m).strip().lower() in ['nan', 'none', '']: val_m = "(blank)"
+        
+        row_class = "row-total" if is_total else ("row-even" if idx % 2 == 0 else "row-odd")
+        rows_bm += f"""
+        <tr class="{row_class}">
+            <td class="align-center">{val_m}</td>
+            <td class="align-right col-bold">{fmt_rp(row['Invoice Amount'])}</td>
+            <td class="align-right">{fmt_rp(row['BM Invoiced'])}</td>
+            <td class="align-right">{fmt_rp(row['BM Paid'])}</td>
+            <td class="align-right">{fmt_rp(row['BM Outstanding'])}</td>
+        </tr>
+        """
+
+    html_bm = f"""
+    <!DOCTYPE html><html><head><style>
+        body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: transparent; }}
+        .process-table {{ width: 100%; border-collapse: collapse; font-size: 11px; color: #000000; }}
+        .process-table th, .process-table td {{ border: 1px solid #7f7f7f; padding: 5px 8px; white-space: nowrap; }}
+        .hdr-month {{ background-color: #d9e1f2; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .hdr-purple {{ background-color: #e2efda; font-weight: bold; text-align: center; vertical-align: middle; }}
+        .row-total {{ font-weight: bold; background-color: #e2efda; }}
+        .row-even {{ background-color: #ffffff; }}
+        .row-odd {{ background-color: #f2f2f2; }}
+        .align-center {{ text-align: center; }}
+        .align-right {{ text-align: right; }}
+        .col-bold {{ font-weight: bold; }}
+    </style></head><body>
+    <div style="overflow-x: auto;">
+        <table class="process-table">
+            <thead>
+                <tr>
+                    <th class="hdr-month" style="width: 120px;">Payment Month</th>
+                    <th class="hdr-purple">Total Invoice Amount</th>
+                    <th class="hdr-purple">BM Invoiced</th>
+                    <th class="hdr-purple">BM Paid</th>
+                    <th class="hdr-purple">BM Outstanding</th>
+                </tr>
+            </thead>
+            <tbody>{rows_bm}</tbody>
+        </table>
+    </div></body></html>
+    """
+    components.html(html_bm, height=min(500, max(180, len(df_tracking_bm) * 28 + 45)), scrolling=True)
+
+st.markdown("---")
