@@ -22,14 +22,18 @@ st.markdown("---")
 SHEET_ID = "1g3Y6GjXUgjWFtKxC9ul8i0vZgHvamkDwT7j4-_95NMk"
 GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-@st.cache_data(ttl=10) # Set 10 detik agar perubahan langsung terasa
+@st.cache_data(ttl=10)
 def load_data():
-    df = pd.read_csv(GSHEET_URL)
+    # Menggunakan low_memory=False untuk menghindari warning DtypeWarning
+    df = pd.read_csv(GSHEET_URL, low_memory=False)
     
-    # 🛠️ NORMALISASI NAMA KOLOM (Hapus spasi ganda / spasi di awal-akhir)
+    # 1. Hapus kolom duplikat (ambil kolom pertama jika ada yang sama)
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+    
+    # 2. Normalisasi spasi di nama kolom
     df.columns = [str(col).strip() for col in df.columns]
     
-    # Mapping otomatis jika ada perbedaan nama/kapitalisasi kolom kunci
+    # 3. Mapping nama kolom secara konsisten
     column_mapping = {}
     for col in df.columns:
         c_upper = col.upper().replace('_', ' ').strip()
@@ -58,7 +62,6 @@ except Exception as e:
     st.error(f"❌ Gagal membaca Google Sheets. Detail: {e}")
     st.stop()
 
-# Inisialisasi df_filtered
 df_filtered = df_raw.copy()
 
 # ==========================================
