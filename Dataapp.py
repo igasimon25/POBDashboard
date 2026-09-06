@@ -17,16 +17,18 @@ st.title("📊 DASHBOARD POB IBS BUILDING MANAGEMENT")
 st.markdown("---")
 
 # ==========================================
-# 2. BACA DATA LOKAL & DATA CLEANING
+# 2. BACA DATA DARI GOOGLE SHEETS & DATA CLEANING
 # ==========================================
-EXCEL_FILE = "data_pobibs.xlsx"
+# Link Google Sheets Publik yang diubah ke format CSV Export
+SHEET_ID = "1g3Y6GjXUgjWFtKxC9ul8i0vZgHvamkDwT7j4-_95NMk"
+GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-@st.cache_data
+@st.cache_data(ttl=600)  # Caching selama 10 menit agar update data terdeteksi otomatis
 def load_data():
-    df = pd.read_excel(EXCEL_FILE)
+    df = pd.read_csv(GSHEET_URL)
     df.columns = df.columns.astype(str).str.strip()
     
-    # 🛠️ PEMBERSIHAN KOLOM AREA (SERAGAMKAN FORMAT "Area 2")
+    # 🛠️ PEMBERSIHAN KOLOM AREA
     if 'Area' in df.columns:
         df['Area'] = (
             df['Area']
@@ -39,11 +41,10 @@ def load_data():
 try:
     df_raw = load_data()
 except Exception as e:
-    st.error(f"❌ Gagal membaca file '{EXCEL_FILE}'. Detail: {e}")
+    st.error(f"❌ Gagal membaca data dari Google Sheets. Detail: {e}")
     st.stop()
 
 df_filtered = df_raw.copy()
-
 # ==========================================
 # 3. SIDEBAR CONTROL & GLOBAL FILTERS
 # ==========================================
