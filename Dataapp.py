@@ -17,25 +17,35 @@ st.title("📊 DASHBOARD POB IBS BUILDING MANAGEMENT")
 st.markdown("---")
 
 # ==========================================
-# BACA DATA DARI GOOGLE SHEETS
+# 2. BACA DATA DARI GOOGLE SHEETS & DATA CLEANING
 # ==========================================
 SHEET_ID = "1g3Y6GjXUgjWFtKxC9ul8i0vZgHvamkDwT7j4-_95NMk"
 GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-@st.cache_data(ttl=60)  # Refresh otomatis setiap 60 detik
+@st.cache_data(ttl=60)
 def load_data():
     df = pd.read_csv(GSHEET_URL)
     df.columns = df.columns.astype(str).str.strip()
     
+    # 🛠️ PEMBERSIHAN KOLOM AREA
     if 'Area' in df.columns:
-        df['Area'] = df['Area'].astype(str).str.strip().str.title()
+        df['Area'] = (
+            df['Area']
+            .astype(str)
+            .str.strip()
+            .str.title()
+        )
     return df
 
 try:
     df_raw = load_data()
 except Exception as e:
-    st.error(f"❌ Gagal membaca Google Sheets: {e}")
+    st.error(f"❌ Gagal membaca Google Sheets. Detail: {e}")
     st.stop()
+
+# Inisialisasi variabel dasar agar tidak NameError
+df_filtered = df_raw.copy()
+
 # ==========================================
 # 3. SIDEBAR CONTROL & GLOBAL FILTERS
 # ==========================================
@@ -110,7 +120,6 @@ def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', col
         height=180
     )
 
-    # Tambahkan parameter key unik
     st.plotly_chart(fig, use_container_width=True, key=element_key)
 
     st.markdown(f"""
@@ -207,7 +216,7 @@ with col5:
         
         create_compact_donut_card("Total Pay In To Huawei", val_payin_huawei, ny_val, element_key="kpi_payin_huawei")
     else:
-        st.warning("Kolom Status Reimburse Actual / NET AMOUNT N/A")
+        st.warning("Kolom N/A")
 
 st.markdown("---")
 
@@ -626,14 +635,13 @@ else:
 st.markdown("---")
 
 # ==========================================
-# 9. PROCESS REIMBURSEMENT SUMMARY TABLE (BERWARNA)
+# 9. PROCESS REIMBURSEMENT SUMMARY TABLE
 # ==========================================
 st.subheader("📊 Process Reimbursement Summary")
 
 def generate_reimbursement_summary_table(df):
     df_calc = df.copy()
 
-    # 1. Bersihkan & Petakan Kolom Numerik (Logika & Formula Asli)
     num_cols = ['NET AMOUNT', 'Amount SAP', 'Amount Paid Based on Setoff Data', 'Amount Paid']
     for col in num_cols:
         if col == 'Amount Paid' and col not in df_calc.columns and 'Amount Actual Paid' in df_calc.columns:
@@ -643,7 +651,6 @@ def generate_reimbursement_summary_table(df):
         else:
             df_calc[col] = 0
 
-    # 2. Filter Khusus Kolom Amount SAP berdasarkan Status SAP ("CLEARED" atau "PAID")
     col_status_sap = 'StatusSAP' if 'StatusSAP' in df_calc.columns else ('Status SAP' if 'Status SAP' in df_calc.columns else None)
     if col_status_sap:
         sap_status_clean = df_calc[col_status_sap].astype(str).str.upper().str.strip()
@@ -652,13 +659,11 @@ def generate_reimbursement_summary_table(df):
     else:
         df_calc['Amount SAP Filtered'] = df_calc['Amount SAP']
 
-    # 3. Identifikasi Kolom Payment Month
     col_m = 'Payment Month' if 'Payment Month' in df_calc.columns else ('Month' if 'Month' in df_calc.columns else 'Periode Month')
     if col_m not in df_calc.columns:
         st.warning("Kolom Payment Month tidak ditemukan.")
         return pd.DataFrame(), col_m
 
-    # 4. GroupBy berdasarkan Rows: Payment Month & Values: Sum of Kolom
     summary = df_calc.groupby(col_m, as_index=False, dropna=False).agg({
         'NET AMOUNT': 'sum',
         'Amount SAP Filtered': 'sum',
@@ -666,7 +671,6 @@ def generate_reimbursement_summary_table(df):
         'Amount Paid': 'sum'
     })
 
-    # 5. Pengurutan Kronologis Payment Month (Lama -> Baru)
     summary['date_parsed'] = pd.to_datetime(summary[col_m].astype(str), format='%b-%y', errors='coerce')
     valid_dates = summary[summary['date_parsed'].notna()].sort_values('date_parsed', ascending=True)
     invalid_dates = summary[summary['date_parsed'].isna()]
@@ -674,10 +678,8 @@ def generate_reimbursement_summary_table(df):
     summary = pd.concat([valid_dates, invalid_dates], ignore_index=True)
     summary = summary.drop(columns=['date_parsed'])
 
-    # 6. Formulas: Hitung GAP = Sum of NET AMOUNT - Sum of Amount Paid Based on Setoff Data
     summary['GAP'] = summary['NET AMOUNT'] - summary['Amount Paid Based on Setoff Data']
 
-    # 7. Baris Grand Total
     grand_total = pd.DataFrame([{
         col_m: 'Grand Total',
         'NET AMOUNT': summary['NET AMOUNT'].sum(),
@@ -691,11 +693,9 @@ def generate_reimbursement_summary_table(df):
 
     return summary_final, col_m
 
-# Menghasilkan Dataframe Raw (Angka Murni)
 df_summary_raw, col_month_name = generate_reimbursement_summary_table(df_filtered)
 
 if not df_summary_raw.empty:
-    # Helper Format Rupiah Sesuai Excel/Gambar
     def fmt_rp(val):
         if abs(val) < 1e-9:
             return "Rp -"
@@ -704,13 +704,11 @@ if not df_summary_raw.empty:
         else:
             return f"Rp {val:,.0f}".replace(",", ".")
 
-    # Render Tabel HTML Berwarna
     rows_html = ""
     for idx, row in df_summary_raw.iterrows():
         val_m = row[col_month_name]
         is_total = (val_m == 'Grand Total')
         
-        # Penanganan Label Kosong/None
         if pd.isna(val_m) or str(val_m).strip().lower() in ['nan', 'none', '']:
             val_m = "(blank)"
 
@@ -736,7 +734,6 @@ if not df_summary_raw.empty:
         .process-table {{ width: 100%; border-collapse: collapse; font-size: 11px; color: #000000; }}
         .process-table th, .process-table td {{ border: 1px solid #7f7f7f; padding: 5px 8px; white-space: nowrap; }}
         
-        /* Stylings & Colors Sesuai Excel */
         .hdr-month {{ background-color: #d9e1f2; font-weight: bold; text-align: center; vertical-align: middle; }}
         .hdr-blue {{ background-color: #b4c6e7; font-weight: bold; text-align: center; vertical-align: middle; }}
         
