@@ -22,19 +22,34 @@ st.markdown("---")
 SHEET_ID = "1g3Y6GjXUgjWFtKxC9ul8i0vZgHvamkDwT7j4-_95NMk"
 GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=10) # Set 10 detik agar perubahan langsung terasa
 def load_data():
     df = pd.read_csv(GSHEET_URL)
-    df.columns = df.columns.astype(str).str.strip()
     
-    # 🛠️ PEMBERSIHAN KOLOM AREA
+    # 🛠️ NORMALISASI NAMA KOLOM (Hapus spasi ganda / spasi di awal-akhir)
+    df.columns = [str(col).strip() for col in df.columns]
+    
+    # Mapping otomatis jika ada perbedaan nama/kapitalisasi kolom kunci
+    column_mapping = {}
+    for col in df.columns:
+        c_upper = col.upper().replace('_', ' ').strip()
+        if c_upper == 'NET AMOUNT':
+            column_mapping[col] = 'NET AMOUNT'
+        elif c_upper == 'INVOICE AMOUNT':
+            column_mapping[col] = 'Invoice Amount'
+        elif c_upper in ['STATUS REIMBURSE ACTUAL', 'STATUS REIMBURSEMENT ACTUAL']:
+            column_mapping[col] = 'Status Reimburse Actual'
+        elif c_upper == 'INVOICE AGENT':
+            column_mapping[col] = 'Invoice Agent'
+        elif c_upper == 'STATUS':
+            column_mapping[col] = 'Status'
+            
+    df = df.rename(columns=column_mapping)
+    
+    # Cleaning isi kolom Area
     if 'Area' in df.columns:
-        df['Area'] = (
-            df['Area']
-            .astype(str)
-            .str.strip()
-            .str.title()
-        )
+        df['Area'] = df['Area'].astype(str).str.strip().str.title()
+        
     return df
 
 try:
@@ -43,7 +58,7 @@ except Exception as e:
     st.error(f"❌ Gagal membaca Google Sheets. Detail: {e}")
     st.stop()
 
-# Inisialisasi variabel dasar agar tidak NameError
+# Inisialisasi df_filtered
 df_filtered = df_raw.copy()
 
 # ==========================================
