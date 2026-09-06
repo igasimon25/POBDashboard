@@ -17,34 +17,25 @@ st.title("📊 DASHBOARD POB IBS BUILDING MANAGEMENT")
 st.markdown("---")
 
 # ==========================================
-# 2. BACA DATA DARI GOOGLE SHEETS & DATA CLEANING
+# BACA DATA DARI GOOGLE SHEETS
 # ==========================================
-# Link Google Sheets Publik yang diubah ke format CSV Export
 SHEET_ID = "1g3Y6GjXUgjWFtKxC9ul8i0vZgHvamkDwT7j4-_95NMk"
 GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-@st.cache_data(ttl=600)  # Caching selama 10 menit agar update data terdeteksi otomatis
+@st.cache_data(ttl=60)  # Refresh otomatis setiap 60 detik
 def load_data():
     df = pd.read_csv(GSHEET_URL)
     df.columns = df.columns.astype(str).str.strip()
     
-    # 🛠️ PEMBERSIHAN KOLOM AREA
     if 'Area' in df.columns:
-        df['Area'] = (
-            df['Area']
-            .astype(str)
-            .str.strip()
-            .str.title()
-        )
+        df['Area'] = df['Area'].astype(str).str.strip().str.title()
     return df
 
 try:
     df_raw = load_data()
 except Exception as e:
-    st.error(f"❌ Gagal membaca data dari Google Sheets. Detail: {e}")
+    st.error(f"❌ Gagal membaca Google Sheets: {e}")
     st.stop()
-
-df_filtered = df_raw.copy()
 # ==========================================
 # 3. SIDEBAR CONTROL & GLOBAL FILTERS
 # ==========================================
