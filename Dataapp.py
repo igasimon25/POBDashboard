@@ -27,7 +27,7 @@ def load_data():
     # Menggunakan low_memory=False untuk menghindari warning DtypeWarning
     df = pd.read_csv(GSHEET_URL, low_memory=False)
     
-    # 1. Hapus kolom duplikat (ambil kolom pertama jika ada yang sama)
+    # 1. Hapus kolom duplikat nama (ambil kolom pertama jika ada header ganda)
     df = df.loc[:, ~df.columns.duplicated()].copy()
     
     # 2. Normalisasi spasi di nama kolom
@@ -138,7 +138,7 @@ def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', col
         height=180
     )
 
-    st.plotly_chart(fig, use_container_width=True, key=element_key)
+    st.plotly_chart(fig, width="stretch", key=element_key)
 
     st.markdown(f"""
     <div style='font-size: 11px; text-align: center; color: #555;'>
@@ -463,7 +463,7 @@ if 'Area' in df_filtered.columns:
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)'
         )
-        st.plotly_chart(fig, use_container_width=True, key=element_key)
+        st.plotly_chart(fig, width="stretch", key=element_key)
         
         st.markdown(f"""
             <div style='text-align: center; font-size: 11px; font-weight: bold; color: #222; margin-top: -10px;'>
@@ -643,7 +643,7 @@ if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and co
                 )
                 
                 clean_reg_key = str(reg_name).replace(" ", "_").replace("-", "_").lower()
-                st.plotly_chart(fig, use_container_width=True, key=f"regional_chart_{clean_reg_key}_{idx}")
+                st.plotly_chart(fig, width="stretch", key=f"regional_chart_{clean_reg_key}_{idx}")
                 st.markdown("<br>", unsafe_allow_html=True)
                 
         st.markdown("</div>", unsafe_allow_html=True)
@@ -751,39 +751,33 @@ if not df_summary_raw.empty:
         body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: transparent; }}
         .process-table {{ width: 100%; border-collapse: collapse; font-size: 11px; color: #000000; }}
         .process-table th, .process-table td {{ border: 1px solid #7f7f7f; padding: 5px 8px; white-space: nowrap; }}
-        
-        .hdr-month {{ background-color: #d9e1f2; font-weight: bold; text-align: center; vertical-align: middle; }}
-        .hdr-blue {{ background-color: #b4c6e7; font-weight: bold; text-align: center; vertical-align: middle; }}
-        
-        .row-total {{ font-weight: bold; background-color: #b4c6e7; }}
-        .row-even {{ background-color: #ffffff; }}
-        .row-odd {{ background-color: #f2f2f2; }}
-        
+        .process-table th {{ background-color: #d9e1f2; font-weight: bold; text-align: center; }}
         .align-center {{ text-align: center; }}
         .align-right {{ text-align: right; }}
         .col-bold {{ font-weight: bold; }}
+        .row-even {{ background-color: #ffffff; }}
+        .row-odd {{ background-color: #f2f2f2; }}
+        .row-total {{ background-color: #d9e1f2; font-weight: bold; }}
     </style>
     </head>
     <body>
-    <div style="overflow-x: auto;">
-        <table class="process-table">
-            <thead>
-                <tr>
-                    <th class="hdr-month" style="width: 12%;">Payment Month</th>
-                    <th class="hdr-blue" style="width: 18%;">Sum of NET AMOUNT</th>
-                    <th class="hdr-blue" style="width: 20%;">Sum of Amount SAP (Cleared/Paid)</th>
-                    <th class="hdr-blue" style="width: 20%;">Sum of Amount Paid Based on Setoff Data</th>
-                    <th class="hdr-blue" style="width: 15%;">Sum of Amount Paid</th>
-                    <th class="hdr-blue" style="width: 15%;">Sum of GAP</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-    </div>
+    <table class="process-table">
+        <thead>
+            <tr>
+                <th>Payment Month</th>
+                <th>NET AMOUNT</th>
+                <th>Amount SAP</th>
+                <th>Amount Paid Setoff</th>
+                <th>Amount Paid</th>
+                <th>GAP</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
     </body>
     </html>
     """
 
-    components.html(full_html, height=400, scrolling=True)
+    components.html(full_html, height=350, scrolling=True)
