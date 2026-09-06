@@ -3,32 +3,30 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
-
 # ==========================================
 # 1. KONFIGURASI HALAMAN & HEADER
 # ==========================================
 st.set_page_config(
     page_title="Dashboard POB IBS Building Management",
-    page_icon="📊",
+    page_icon="
+📊
+",
     layout="wide"
 )
-
-st.title("📊 DASHBOARD POB IBS BUILDING MANAGEMENT")
+st.title("
+📊
+ DASHBOARD POB IBS BUILDING MANAGEMENT")
 st.markdown("---")
-
 # ==========================================
 # 2. BACA DATA DARI GOOGLE SHEETS & DATA CLEANING
 # ==========================================
 SHEET_ID = "1g3Y6GjXUgjWFtKxC9ul8i0vZgHvamkDwT7j4-_95NMk"
 GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
-
 @st.cache_data(ttl=10)
 def load_data():
     df = pd.read_csv(GSHEET_URL, low_memory=False)
-    
     # 1. Normalisasi spasi di nama kolom
     df.columns = [str(col).strip() for col in df.columns]
-    
     # 2. Mapping nama kolom secara konsisten
     column_mapping = {}
     for col in df.columns:
@@ -43,12 +41,9 @@ def load_data():
             column_mapping[col] = 'Invoice Agent'
         elif c_upper == 'STATUS':
             column_mapping[col] = 'Status'
-            
     df = df.rename(columns=column_mapping)
-    
     # 3. Hapus kolom duplikat SETELAH rename agar benar-benar unik
     df = df.loc[:, ~df.columns.duplicated(keep='first')].copy()
-    
     # 4. Cleaning khusus pembersihan teks mata uang (Rp, spasi, pemisah ribuan)
     def clean_currency_to_float(series):
         if isinstance(series, pd.DataFrame):
@@ -58,71 +53,61 @@ def load_data():
             .str.replace(r'[^0-9.-]', '', regex=True)
             .replace('', '0')
         )
-
-    numeric_cols = ['Invoice Amount', 'NET AMOUNT', 'Amount SAP', 'Amount Paid Based on Setoff Data', 'Amount Actual Paid', 'Amount Paid']
+    numeric_cols = ['Invoice Amount', 'NET AMOUNT', 'Amount SAP', 'Amount Paid Based on Setoff Data', 'Amount Actual
     for ncol in numeric_cols:
         if ncol in df.columns:
             cleaned_series = clean_currency_to_float(df[ncol])
             df[ncol] = pd.to_numeric(cleaned_series, errors='coerce').fillna(0)
-
     # Cleaning isi kolom Area
     if 'Area' in df.columns:
         df['Area'] = df['Area'].astype(str).str.strip().str.title()
-        
     return df
-
 try:
     df_raw = load_data()
 except Exception as e:
-    st.error(f"❌ Gagal membaca Google Sheets. Detail: {e}")
+    st.error(f"
+❌
+ Gagal membaca Google Sheets. Detail: {e}")
     st.stop()
-
 df_filtered = df_raw.copy()
-
 # ==========================================
 # 3. SIDEBAR CONTROL & GLOBAL FILTERS
 # ==========================================
-st.sidebar.header("🔍 Global Filters")
-
+st.sidebar.header("
+🔍
+ Global Filters")
 # Filter Area
 if 'Area' in df_raw.columns:
     raw_areas = df_raw['Area'].dropna().unique().tolist()
     clean_areas = sorted([str(x) for x in raw_areas if str(x).lower() != 'nan'])
     list_area = ["(All)"] + clean_areas
     selected_area = st.sidebar.selectbox("Area Filter", options=list_area, index=0)
-    
     if selected_area != "(All)":
         df_filtered = df_filtered[df_filtered['Area'] == selected_area]
-
 # Filter Payment Month
-col_month = 'Payment Month' if 'Payment Month' in df_filtered.columns else ('Month' if 'Month' in df_filtered.columns else None)
+col_month = 'Payment Month' if 'Payment Month' in df_filtered.columns else ('Month' if 'Month' in df_filtered.column
 if col_month and col_month in df_filtered.columns:
     list_month = ["(All Months)"] + [str(x) for x in df_filtered[col_month].dropna().unique().tolist()]
     selected_month = st.sidebar.selectbox("Payment Month Filter", options=list_month, index=0)
     if selected_month != "(All Months)":
         df_filtered = df_filtered[df_filtered[col_month].astype(str) == selected_month]
-
 # Filter New Regional
 if 'new regional' in df_filtered.columns:
     list_reg = ["(All Regionals)"] + [str(x) for x in df_filtered['new regional'].dropna().unique().tolist()]
     selected_reg = st.sidebar.selectbox("New Regional Filter", options=list_reg, index=0)
     if selected_reg != "(All Regionals)":
         df_filtered = df_filtered[df_filtered['new regional'].astype(str) == selected_reg]
-
 # ==========================================
 # FUNGSI HELPER: COMPACT DONUT CHART (KPI)
 # ==========================================
 def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', color_ny='#E53935', element_key=None):
     total_val = paid_val + ny_val
     pct_done = (paid_val / total_val * 100) if total_val > 0 else 0.0
-
     paid_m = paid_val / 1_000_000_000
     ny_m = ny_val / 1_000_000_000
     total_m = total_val / 1_000_000_000
-
-    st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 13px; min-height: 38px;'>{title}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div style='text-align: center; color: #1E88E5; font-weight: bold; font-size: 16px; margin-bottom: 5px;'>Rp {total_m:,.2f} M</div>", unsafe_allow_html=True)
-
+    st.markdown(f"<div style='text-align: center; font-weight: bold; font-size: 13px; min-height: 38px;'>{title}</di
+    st.markdown(f"<div style='text-align: center; color: #1E88E5; font-weight: bold; font-size: 16px; margin-bottom:
     fig = go.Figure(data=[go.Pie(
         labels=['Done', 'Not Yet Paid'],
         values=[paid_m, ny_m],
@@ -131,7 +116,6 @@ def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', col
         textinfo='none',
         hovertemplate="<b>%{label}</b><br>Nominal: Rp %{value:,.2f} M<br>Proporsi: %{percent}<extra></extra>"
     )])
-
     fig.update_layout(
         annotations=[dict(
             text=f"<b>{pct_done:.1f}%</b>",
@@ -152,29 +136,25 @@ def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', col
         margin=dict(l=5, r=5, t=5, b=5),
         height=180
     )
-
     st.plotly_chart(fig, width="stretch", key=element_key)
-
     st.markdown(f"""
     <div style='font-size: 11px; text-align: center; color: #555;'>
         Done: <b>Rp {paid_m:,.2f}M</b><br>
         NY: <b>Rp {ny_m:,.2f}M</b>
     </div>
     """, unsafe_allow_html=True)
-
 # ==========================================
 # 4. 5 CHART KPI SEJAJAR HORIZONTAL
 # ==========================================
-st.subheader("📌 Key Performance Indicators (KPI Overview)")
-
+st.subheader("
+📌
+ Key Performance Indicators (KPI Overview)")
 col1, col2, col3, col4, col5 = st.columns(5)
-
 val_payout_bm = 0
 val_huawei_agent = 0
 val_agent_tsel = 0
 val_dn_issued = 0
 val_payin_huawei = 0
-
 # 1. Total Payout to BM
 with col1:
     df_c1 = df_filtered.copy()
@@ -186,7 +166,6 @@ with col1:
         create_compact_donut_card("Total Payout to BM", val_payout_bm, ny_val, element_key="kpi_payout_bm")
     else:
         st.warning("Kolom N/A")
-
 # 2. Huawei To Agent
 with col2:
     df_c2 = df_filtered.copy()
@@ -198,7 +177,6 @@ with col2:
         create_compact_donut_card("Huawei To Agent", val_huawei_agent, ny_val, element_key="kpi_huawei_agent")
     else:
         st.warning("Kolom N/A")
-
 # 3. Agent To Telkomsel
 with col3:
     df_c3 = df_filtered.copy()
@@ -212,7 +190,6 @@ with col3:
         create_compact_donut_card("Agent To Telkomsel", val_agent_tsel, ny_val, element_key="kpi_agent_tsel")
     else:
         st.warning("Kolom N/A")
-
 # 4. DN Issued
 with col4:
     df_c4 = df_filtered.copy()
@@ -225,7 +202,6 @@ with col4:
         create_compact_donut_card("DN Issued", val_dn_issued, ny_val, element_key="kpi_dn_issued")
     else:
         st.warning("Kolom N/A")
-
 # 5. Total Pay In To Huawei
 with col5:
     df_c5 = df_filtered.copy()
@@ -236,23 +212,20 @@ with col5:
         val_payin_huawei = df_c5[mask_paid][col_amt].sum()
         mask_ny = status_clean.str.contains('DN', na=False) & ~mask_paid
         ny_val = df_c5[mask_ny][col_amt].sum()
-        create_compact_donut_card("Total Pay In To Huawei", val_payin_huawei, ny_val, element_key="kpi_payin_huawei")
+        create_compact_donut_card("Total Pay In To Huawei", val_payin_huawei, ny_val, element_key="kpi_payin_huawei"
     else:
         st.warning("Kolom N/A")
-
 st.markdown("---")
-
 # ==========================================
 # 5. STATUS PAY OUT (TABLE MAPPING)
 # ==========================================
-st.subheader("📋 Status Pay Out")
-
+st.subheader("
+📋
+ Status Pay Out")
 col_status = 'Status'
 col_amount = 'Invoice Amount'
-
 if col_status in df_filtered.columns and col_amount in df_filtered.columns:
     df_status_calc = df_filtered.copy()
-
     target_statuses = [
         "MODIFY REQUEST",
         "PAID",
@@ -262,10 +235,8 @@ if col_status in df_filtered.columns and col_amount in df_filtered.columns:
         "WAITING MGR APPROVAL",
         "WAITING PAYMENT APPROVAL"
     ]
-
-    grouped = df_status_calc.groupby(df_status_calc[col_status].astype(str).str.strip(), as_index=False)[col_amount].sum()
+    grouped = df_status_calc.groupby(df_status_calc[col_status].astype(str).str.strip(), as_index=False)[col_amount]
     status_dict = {str(k).upper().strip(): v for k, v in zip(grouped[col_status], grouped[col_amount])}
-
     st.markdown("""
         <style>
         .status-box {
@@ -300,52 +271,48 @@ if col_status in df_filtered.columns and col_amount in df_filtered.columns:
         }
         </style>
     """, unsafe_allow_html=True)
-
     col_layout, _ = st.columns([2, 3])
     with col_layout:
         for status_item in target_statuses:
             amount_val = status_dict.get(status_item.upper().strip(), 0)
-            amount_str = f"Rp{amount_val:,.0f}".replace(",", ".") if amount_val > 0 else ("Rp0" if amount_val == 0 else "Rp-")
-
+            amount_str = f"Rp{amount_val:,.0f}".replace(",", ".") if amount_val > 0 else ("Rp0" if amount_val == 0 e
             c1, c2 = st.columns([1.2, 2])
             with c1:
                 st.markdown(f"<div class='status-box'>{status_item}</div>", unsafe_allow_html=True)
             with c2:
                 st.markdown(f"<div class='amount-box'>{amount_str}</div>", unsafe_allow_html=True)
-
 st.markdown("---")
-
 # ==========================================
 # 6. END-TO-END PROCESS WORKFLOW & SLA
 # ==========================================
-st.subheader("🔄 End-to-End Process Workflow & SLA")
-
+st.subheader("
+🔄
+ End-to-End Process Workflow & SLA")
 str_payout_bm = f"Rp{val_payout_bm:,.0f}".replace(",", ".") if val_payout_bm > 0 else "Rp0"
 str_huawei_agent = f"Rp{val_huawei_agent:,.0f}".replace(",", ".") if val_huawei_agent > 0 else "Rp0"
 str_agent_tsel = f"Rp{val_agent_tsel:,.0f}".replace(",", ".") if val_agent_tsel > 0 else "Rp0"
 str_dn_issued = f"Rp{val_dn_issued:,.0f}".replace(",", ".") if val_dn_issued > 0 else "Rp0"
 str_payin_huawei = f"Rp{val_payin_huawei:,.0f}".replace(",", ".") if val_payin_huawei > 0 else "Rp0"
-
 html_content = f"""
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-    body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: transparent; margin: 0; padding: 5px; }}
+    body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: transparent; margin: 0; 
     .flow-container {{ display: flex; flex-direction: column; gap: 20px; width: 100%; }}
     .flow-row {{ display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }}
     .flow-card-wrapper {{ display: flex; flex-direction: column; align-items: center; flex: 1; }}
-    .amount-badge {{ background: linear-gradient(180deg, #1f497d 0%, #0d284a 100%); color: white; font-weight: bold; font-size: 11px; padding: 5px 8px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); margin-bottom: -12px; z-index: 10; width: 85%; text-align: center; white-space: nowrap; }}
-    .flow-card {{ border-radius: 8px; padding: 18px 8px 10px 8px; width: 100%; min-height: 95px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-size: 11px; font-weight: 600; box-shadow: 0 2px 5px rgba(0,0,0,0.08); border: 1px solid #ccc; box-sizing: border-box; }}
+    .amount-badge {{ background: linear-gradient(180deg, #1f497d 0%, #0d284a 100%); color: white; font-weight: bold;
+    .flow-card {{ border-radius: 8px; padding: 18px 8px 10px 8px; width: 100%; min-height: 95px; display: flex; flex
     .card-huawei {{ background-color: #dce6f1; border-color: #b8cce4; color: #1f497d; }}
     .card-rpj {{ background-color: #fce4d6; border-color: #f8c2a6; color: #c65911; }}
     .card-telkomsel {{ background-color: #fff2cc; border-color: #ffe599; color: #806000; }}
     .sla-label {{ font-size: 10px; font-weight: bold; color: #555; margin-top: 6px; }}
     .arrow-right {{ font-size: 20px; color: #1f497d; font-weight: bold; margin-top: 45px; }}
-    .arrow-down {{ font-size: 22px; color: #1f497d; font-weight: bold; text-align: right; padding-right: 40px; margin-top: -10px; margin-bottom: -10px; }}
+    .arrow-down {{ font-size: 22px; color: #1f497d; font-weight: bold; text-align: right; padding-right: 40px; margi
     .legend-container {{ display: flex; justify-content: flex-end; gap: 15px; margin-top: 20px; }}
-    .legend-item {{ display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: bold; color: #333; }}
+    .legend-item {{ display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: bold; color: #333; }
     .legend-box {{ width: 30px; height: 14px; border-radius: 3px; border: 1px solid #ccc; }}
 </style>
 </head>
@@ -386,7 +353,9 @@ html_content = f"""
     <div class="arrow-down">↓</div>
     <div class="flow-row">
         <div class="flow-card-wrapper">
-            <div style="font-size: 14px; margin-bottom: -6px; z-index: 11;">🏅</div>
+            <div style="font-size: 14px; margin-bottom: -6px; z-index: 11;">
+🏅
+</div>
             <div class="amount-badge">{str_payin_huawei}</div>
             <div class="flow-card card-rpj">Agent Paid to Huawei</div>
             <div class="sla-label">SLA 30 Days</div>
@@ -412,37 +381,32 @@ html_content = f"""
     </div>
 </div>
 <div class="legend-container">
-    <div class="legend-item"><div class="legend-box" style="background-color: #dce6f1; border-color: #b8cce4;"></div> Huawei</div>
-    <div class="legend-item"><div class="legend-box" style="background-color: #fff2cc; border-color: #ffe599;"></div> Telkomsel</div>
-    <div class="legend-item"><div class="legend-box" style="background-color: #fce4d6; border-color: #f8c2a6;"></div> RPJ (Agent)</div>
+    <div class="legend-item"><div class="legend-box" style="background-color: #dce6f1; border-color: #b8cce4;"></div
+    <div class="legend-item"><div class="legend-box" style="background-color: #fff2cc; border-color: #ffe599;"></div
+    <div class="legend-item"><div class="legend-box" style="background-color: #fce4d6; border-color: #f8c2a6;"></div
 </div>
 </body>
 </html>
 """
-
 components.html(html_content, height=440, scrolling=False)
-
 st.markdown("---")
-
 # ==========================================
 # 7. PAYOUT & PAYIN BY AREA
 # ==========================================
-st.subheader("📊 Payout (Bn IDR) & Payin (Bn IDR)")
-
+st.subheader("
+📊
+ Payout (Bn IDR) & Payin (Bn IDR)")
 if 'Area' in df_filtered.columns:
     raw_unique_areas = df_filtered['Area'].dropna().unique().tolist()
     unique_areas = sorted([str(x) for x in raw_unique_areas if str(x).lower() != 'nan'])
-    
     def draw_area_donut(title, done_bn, ny_bn, color_main, element_key=None):
         total_bn = done_bn + ny_bn
         pct_done = (done_bn / total_bn * 100) if total_bn > 0 else 0.0
-        
         st.markdown(f"""
-            <div style='background-color: #f0f0f0; padding: 4px 10px; border-radius: 4px; text-align: center; font-weight: bold; font-size: 13px; color: #111;'>
+            <div style='background-color: #f0f0f0; padding: 4px 10px; border-radius: 4px; text-align: center; font-w
                 {title}
             </div>
         """, unsafe_allow_html=True)
-        
         fig = go.Figure(data=[go.Pie(
             labels=['Done', 'Not Yet Paid'],
             values=[done_bn, ny_bn],
@@ -451,15 +415,14 @@ if 'Area' in df_filtered.columns:
             textinfo='none',
             hovertemplate="<b>%{label}</b><br>Nominal: %{value:.2f} Bn IDR<extra></extra>"
         )])
-        
         fig.update_layout(
             annotations=[dict(
                 text=f"<b>{pct_done:.1f}%</b>",
                 x=0.5, y=0.5,
+            )],
                 font_size=14,
                 showarrow=False,
                 font_color="#000000"
-            )],
             showlegend=False,
             margin=dict(l=10, r=10, t=10, b=10),
             height=160,
@@ -467,13 +430,11 @@ if 'Area' in df_filtered.columns:
             plot_bgcolor='rgba(0,0,0,0)'
         )
         st.plotly_chart(fig, width="stretch", key=element_key)
-        
         st.markdown(f"""
             <div style='text-align: center; font-size: 11px; font-weight: bold; color: #222; margin-top: -10px;'>
                 <span style='color: #888;'>NY: {ny_bn:,.2f}</span> | <span>Done: {done_bn:,.2f}</span>
             </div>
         """, unsafe_allow_html=True)
-
     st.markdown("""
         <style>
         .area-container {
@@ -484,71 +445,56 @@ if 'Area' in df_filtered.columns:
         }
         </style>
     """, unsafe_allow_html=True)
-
     with st.container():
         st.markdown("<div class='area-container'>", unsafe_allow_html=True)
-        
         for area_name in unique_areas:
             df_area = df_filtered[df_filtered['Area'] == area_name]
-            
             col_amt_payout = 'Invoice Amount' if 'Invoice Amount' in df_area.columns else 'NET AMOUNT'
             if 'Status' in df_area.columns and col_amt_payout in df_area.columns:
                 payout_series = df_area[col_amt_payout]
-                mask_payout_done = df_area['Status'].astype(str).str.upper().str.strip().str.contains('PAID', na=False)
+                mask_payout_done = df_area['Status'].astype(str).str.upper().str.strip().str.contains('PAID', na=Fal
                 payout_done_bn = payout_series[mask_payout_done].sum() / 1_000_000_000
                 payout_ny_bn = payout_series[~mask_payout_done].sum() / 1_000_000_000
             else:
                 payout_done_bn, payout_ny_bn = 0.0, 0.0
-
             col_amt_payin = 'NET AMOUNT'
             if 'Status Reimburse Actual' in df_area.columns and col_amt_payin in df_area.columns:
                 payin_series = df_area[col_amt_payin]
                 status_area_clean = df_area['Status Reimburse Actual'].astype(str).str.upper().str.strip()
-                
                 mask_payin_done = status_area_clean.str.contains('PAID', na=False)
                 mask_payin_ny = status_area_clean.str.contains('DN', na=False) & ~mask_payin_done
-                
                 payin_done_bn = payin_series[mask_payin_done].sum() / 1_000_000_000
                 payin_ny_bn = payin_series[mask_payin_ny].sum() / 1_000_000_000
             else:
                 payin_done_bn, payin_ny_bn = 0.0, 0.0
-
             c_payout, c_payin = st.columns(2)
             clean_area_key = str(area_name).replace(" ", "_").lower()
             with c_payout:
-                draw_area_donut(f"Progress Payout {area_name}", payout_done_bn, payout_ny_bn, color_main='#70AD47', element_key=f"area_payout_{clean_area_key}")
+                draw_area_donut(f"Progress Payout {area_name}", payout_done_bn, payout_ny_bn, color_main='#70AD47', 
             with c_payin:
-                draw_area_donut(f"Progress Payin {area_name}", payin_done_bn, payin_ny_bn, color_main='#ED7D31', element_key=f"area_payin_{clean_area_key}")
-            
+                draw_area_donut(f"Progress Payin {area_name}", payin_done_bn, payin_ny_bn, color_main='#ED7D31', ele
             st.markdown("<br>", unsafe_allow_html=True)
-            
         st.markdown("</div>", unsafe_allow_html=True)
 else:
     st.warning("Kolom 'Area' tidak ditemukan pada dataset.")
-
 st.markdown("---")
-
 # ==========================================
 # 8. INVOICE REGIONAL (INVOICE PROCESS)
 # ==========================================
-st.subheader("📊 Invoice Process (Invoice Regional)")
-
+st.subheader("
+📊
+ Invoice Process (Invoice Regional)")
 df_inv_reg = df_filtered.copy()
-
 col_inv_agent = 'Invoice Agent'
 if col_inv_agent in df_raw.columns:
     raw_agents = [str(x) for x in df_raw[col_inv_agent].dropna().unique().tolist()]
     list_inv_agent = ["INVOICE DONE", "(All)"] + [x for x in raw_agents if x != "INVOICE DONE"]
-    
     selected_inv_agent = st.selectbox("Filter Invoice Agent", options=list_inv_agent, index=0)
-    
     if selected_inv_agent != "(All)":
-        df_inv_reg = df_inv_reg[df_inv_reg[col_inv_agent].astype(str).str.upper().str.strip().str.contains(selected_inv_agent.upper().strip(), na=False)]
-
+        df_inv_reg = df_inv_reg[df_inv_reg[col_inv_agent].astype(str).str.upper().str.strip().str.contains(selected_
 col_reg = 'new regional'
 col_status_sap = 'StatusSAP'
 col_net_amt = 'NET AMOUNT'
-
 if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and col_net_amt in df_inv_reg.columns:
     target_order = [
         "R03_Jakarta Banten",
@@ -558,13 +504,11 @@ if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and co
         "R09_Sulawesi",
         "R11_Maluku dan Papua"
     ]
-    
     available_regionals = df_inv_reg[col_reg].dropna().unique().tolist()
     ordered_regionals = [r for r in target_order if r in available_regionals]
     for r in available_regionals:
         if r not in ordered_regionals and str(r).lower() != 'nan':
             ordered_regionals.append(r)
-    
     st.markdown("""
         <style>
         .regional-container {
@@ -586,37 +530,26 @@ if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and co
         }
         </style>
     """, unsafe_allow_html=True)
-
     with st.container():
         st.markdown("<div class='regional-container'>", unsafe_allow_html=True)
-        
         num_cols = 3
         cols = st.columns(num_cols)
-        
         for idx, reg_name in enumerate(ordered_regionals):
             col_target = cols[idx % num_cols]
-            
             df_reg = df_inv_reg[df_inv_reg[col_reg].astype(str) == reg_name]
             status_sap_clean = df_reg[col_status_sap].astype(str).str.upper().str.strip()
-            
             mask_done = status_sap_clean.str.contains('CLEAR|PAID', regex=True, na=False)
             done_val = df_reg[mask_done][col_net_amt].sum()
             done_m = done_val / 1_000_000_000
-            
             ny_val = df_reg[~mask_done][col_net_amt].sum()
             ny_m = ny_val / 1_000_000_000
-            
             total_m = done_m + ny_m
             pct_done = (done_m / total_m * 100) if total_m > 0 else 0.0
-            
             text_done = f"{done_m:.2f}".replace('.', ',')
             text_ny = f"{ny_m:.2f}".replace('.', ',')
-            
             with col_target:
                 st.markdown(f"<div class='regional-card-title'>{reg_name}</div>", unsafe_allow_html=True)
-                
                 color_ny = '#E67E22' if idx >= 3 else '#A6A6A6'
-                
                 fig = go.Figure(data=[go.Pie(
                     labels=['Cleared/Paid', 'Not Yet Paid'],
                     values=[done_m, ny_m],
@@ -627,7 +560,6 @@ if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and co
                     marker=dict(colors=['#2F5597', color_ny]),
                     hovertemplate="<b>%{label}</b><br>Nominal: Rp %{value:.2f} M<extra></extra>"
                 )])
-                
                 fig.update_layout(
                     annotations=[dict(
                         text=f"<b>{pct_done:.2f}%</b>".replace('.', ','),
@@ -642,69 +574,55 @@ if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and co
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)'
                 )
-                
                 clean_reg_key = str(reg_name).replace(" ", "_").replace("-", "_").lower()
                 st.plotly_chart(fig, width="stretch", key=f"regional_chart_{clean_reg_key}_{idx}")
                 st.markdown("<br>", unsafe_allow_html=True)
-                
         st.markdown("</div>", unsafe_allow_html=True)
 else:
     st.warning("Kolom 'new regional', 'StatusSAP', atau 'NET AMOUNT' tidak ditemukan dalam dataset.")
-
 st.markdown("---")
-
 # ==========================================
 # 9. PROCESS REIMBURSEMENT SUMMARY TABLE
 # ==========================================
-st.subheader("📊 Process Reimbursement Summary")
-
+st.subheader("
+📊
+ Process Reimbursement Summary")
 def generate_reimbursement_summary_table(df):
     df_calc = df.copy()
-
-    col_status_sap = 'StatusSAP' if 'StatusSAP' in df_calc.columns else ('Status SAP' if 'Status SAP' in df_calc.columns else None)
+    col_status_sap = 'StatusSAP' if 'StatusSAP' in df_calc.columns else ('Status SAP' if 'Status SAP' in df_calc.col
     if col_status_sap:
         sap_status_clean = df_calc[col_status_sap].astype(str).str.upper().str.strip()
         mask_sap_cleared = sap_status_clean.str.contains('CLEAR|PAID', regex=True, na=False)
         df_calc['Amount SAP Filtered'] = np.where(mask_sap_cleared, df_calc['Amount SAP'], 0)
     else:
         df_calc['Amount SAP Filtered'] = df_calc['Amount SAP']
-
-    col_m = 'Payment Month' if 'Payment Month' in df_calc.columns else ('Month' if 'Month' in df_calc.columns else 'Periode Month')
+    col_m = 'Payment Month' if 'Payment Month' in df_calc.columns else ('Month' if 'Month' in df_calc.columns else '
     if col_m not in df_calc.columns:
         st.warning("Kolom Payment Month tidak ditemukan.")
         return pd.DataFrame(), col_m
-
     summary = df_calc.groupby(col_m, as_index=False, dropna=False).agg({
         'NET AMOUNT': 'sum',
         'Amount SAP Filtered': 'sum',
         'Amount Paid Based on Setoff Data': 'sum',
         'Amount Paid': 'sum'
     })
-
     summary['date_parsed'] = pd.to_datetime(summary[col_m].astype(str), format='%b-%y', errors='coerce')
     valid_dates = summary[summary['date_parsed'].notna()].sort_values('date_parsed', ascending=True)
     invalid_dates = summary[summary['date_parsed'].isna()]
-    
     summary = pd.concat([valid_dates, invalid_dates], ignore_index=True)
     summary = summary.drop(columns=['date_parsed'])
-
     summary['GAP'] = summary['NET AMOUNT'] - summary['Amount Paid Based on Setoff Data']
-
     grand_total = pd.DataFrame([{
         col_m: 'Grand Total',
         'NET AMOUNT': summary['NET AMOUNT'].sum(),
+    }])
         'Amount SAP Filtered': summary['Amount SAP Filtered'].sum(),
         'Amount Paid Based on Setoff Data': summary['Amount Paid Based on Setoff Data'].sum(),
         'Amount Paid': summary['Amount Paid'].sum(),
         'GAP': summary['GAP'].sum()
-    }])
-
     summary_final = pd.concat([summary, grand_total], ignore_index=True)
-
     return summary_final, col_m
-
 df_summary_raw, col_month_name = generate_reimbursement_summary_table(df_filtered)
-
 if not df_summary_raw.empty:
     def fmt_rp(val):
         if abs(val) < 1e-9:
@@ -713,17 +631,13 @@ if not df_summary_raw.empty:
             return f"-Rp {abs(val):,.0f}".replace(",", ".")
         else:
             return f"Rp {val:,.0f}".replace(",", ".")
-
     rows_html = ""
     for idx, row in df_summary_raw.iterrows():
         val_m = row[col_month_name]
         is_total = (val_m == 'Grand Total')
-        
         if pd.isna(val_m) or str(val_m).strip().lower() in ['nan', 'none', '']:
             val_m = "(blank)"
-
         row_class = "row-total" if is_total else ("row-even" if idx % 2 == 0 else "row-odd")
-
         rows_html += f"""
         <tr class="{row_class}">
             <td class="align-center">{val_m}</td>
@@ -734,7 +648,6 @@ if not df_summary_raw.empty:
             <td class="align-right col-bold">{fmt_rp(row['GAP'])}</td>
         </tr>
         """
-
     full_html = f"""
     <!DOCTYPE html>
     <html>
@@ -771,5 +684,4 @@ if not df_summary_raw.empty:
     </body>
     </html>
     """
-
     components.html(full_html, height=350, scrolling=True)
