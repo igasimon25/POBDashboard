@@ -24,16 +24,12 @@ GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=c
 
 @st.cache_data(ttl=10)
 def load_data():
-    # Menggunakan low_memory=False untuk menghindari warning DtypeWarning
     df = pd.read_csv(GSHEET_URL, low_memory=False)
     
-    # 1. Hapus kolom duplikat nama (ambil kolom pertama jika ada header ganda)
-    df = df.loc[:, ~df.columns.duplicated()].copy()
-    
-    # 2. Normalisasi spasi di nama kolom
+    # 1. Normalisasi spasi di nama kolom
     df.columns = [str(col).strip() for col in df.columns]
     
-    # 3. Mapping nama kolom secara konsisten
+    # 2. Mapping nama kolom secara konsisten
     column_mapping = {}
     for col in df.columns:
         c_upper = col.upper().replace('_', ' ').strip()
@@ -50,6 +46,18 @@ def load_data():
             
     df = df.rename(columns=column_mapping)
     
+    # 3. Hapus kolom duplikat SETELAH rename agar benar-benar unik
+    df = df.loc[:, ~df.columns.duplicated(keep='first')].copy()
+    
+    # 4. Cleaning & konversi awal kolom numerik ke Series 1D aman
+    numeric_cols = ['Invoice Amount', 'NET AMOUNT', 'Amount SAP', 'Amount Paid Based on Setoff Data', 'Amount Actual Paid', 'Amount Paid']
+    for ncol in numeric_cols:
+        if ncol in df.columns:
+            col_data = df[ncol]
+            if isinstance(col_data, pd.DataFrame):
+                col_data = col_data.iloc[:, 0]
+            df[ncol] = pd.to_numeric(col_data, errors='coerce').fillna(0)
+
     # Cleaning isi kolom Area
     if 'Area' in df.columns:
         df['Area'] = df['Area'].astype(str).str.strip().str.title()
@@ -166,7 +174,6 @@ with col1:
     df_c1 = df_filtered.copy()
     col_status, col_amt = 'Status', 'Invoice Amount'
     if col_status in df_c1.columns and col_amt in df_c1.columns:
-        df_c1[col_amt] = pd.to_numeric(df_c1[col_amt], errors='coerce').fillna(0)
         mask_paid = df_c1[col_status].astype(str).str.upper().str.strip() == 'PAID'
         val_payout_bm = df_c1[mask_paid][col_amt].sum()
         ny_val = df_c1[~mask_paid][col_amt].sum()
@@ -179,7 +186,6 @@ with col2:
     df_c2 = df_filtered.copy()
     col_status, col_amt = 'Status', 'NET AMOUNT'
     if col_status in df_c2.columns and col_amt in df_c2.columns:
-        df_c2[col_amt] = pd.to_numeric(df_c2[col_amt], errors='coerce').fillna(0)
         mask_paid = df_c2[col_status].astype(str).str.upper().str.strip() == 'PAID'
         val_huawei_agent = df_c2[mask_paid][col_amt].sum()
         ny_val = df_c2[~mask_paid][col_amt].sum()
@@ -194,7 +200,6 @@ with col3:
     if col_inv in df_c3.columns:
         df_c3 = df_c3[df_c3[col_inv].astype(str).str.upper().str.strip() == 'INVOICE DONE']
     if col_status in df_c3.columns and col_amt in df_c3.columns:
-        df_c3[col_amt] = pd.to_numeric(df_c3[col_amt], errors='coerce').fillna(0)
         mask_paid = df_c3[col_status].astype(str).str.upper().str.strip() == 'PAID'
         val_agent_tsel = df_c3[mask_paid][col_amt].sum()
         ny_val = df_c3[~mask_paid][col_amt].sum()
@@ -207,7 +212,6 @@ with col4:
     df_c4 = df_filtered.copy()
     col_status, col_amt = 'Status Reimburse Actual', 'NET AMOUNT'
     if col_status in df_c4.columns and col_amt in df_c4.columns:
-        df_c4[col_amt] = pd.to_numeric(df_c4[col_amt], errors='coerce').fillna(0)
         status_clean = df_c4[col_status].astype(str).str.upper().str.strip()
         mask_done = status_clean.isin(['PAID', 'DN ISSUED'])
         val_dn_issued = df_c4[mask_done][col_amt].sum()
@@ -219,19 +223,13 @@ with col4:
 # 5. Total Pay In To Huawei
 with col5:
     df_c5 = df_filtered.copy()
-    col_status = 'Status Reimburse Actual'
-    col_amt = 'NET AMOUNT'
-    
+    col_status, col_amt = 'Status Reimburse Actual', 'NET AMOUNT'
     if col_status in df_c5.columns and col_amt in df_c5.columns:
-        df_c5[col_amt] = pd.to_numeric(df_c5[col_amt], errors='coerce').fillna(0)
         status_clean = df_c5[col_status].astype(str).str.upper().str.strip()
-        
         mask_paid = status_clean == 'PAID'
         val_payin_huawei = df_c5[mask_paid][col_amt].sum()
-        
         mask_ny = status_clean.isin(['DN ISSUED', 'NY ISSUE DN'])
         ny_val = df_c5[mask_ny][col_amt].sum()
-        
         create_compact_donut_card("Total Pay In To Huawei", val_payin_huawei, ny_val, element_key="kpi_payin_huawei")
     else:
         st.warning("Kolom N/A")
@@ -248,7 +246,6 @@ col_amount = 'Invoice Amount'
 
 if col_status in df_filtered.columns and col_amount in df_filtered.columns:
     df_status_calc = df_filtered.copy()
-    df_status_calc[col_amount] = pd.to_numeric(df_status_calc[col_amount], errors='coerce').fillna(0)
 
     target_statuses = [
         "MODIFY REQUEST",
@@ -490,7 +487,7 @@ if 'Area' in df_filtered.columns:
             
             col_amt_payout = 'Invoice Amount' if 'Invoice Amount' in df_area.columns else 'NET AMOUNT'
             if 'Status' in df_area.columns and col_amt_payout in df_area.columns:
-                payout_series = pd.to_numeric(df_area[col_amt_payout], errors='coerce').fillna(0)
+                payout_series = df_area[col_amt_payout]
                 mask_payout_done = df_area['Status'].astype(str).str.upper().str.strip() == 'PAID'
                 payout_done_bn = payout_series[mask_payout_done].sum() / 1_000_000_000
                 payout_ny_bn = payout_series[~mask_payout_done].sum() / 1_000_000_000
@@ -499,7 +496,7 @@ if 'Area' in df_filtered.columns:
 
             col_amt_payin = 'NET AMOUNT'
             if 'Status Reimburse Actual' in df_area.columns and col_amt_payin in df_area.columns:
-                payin_series = pd.to_numeric(df_area[col_amt_payin], errors='coerce').fillna(0)
+                payin_series = df_area[col_amt_payin]
                 status_area_clean = df_area['Status Reimburse Actual'].astype(str).str.upper().str.strip()
                 
                 mask_payin_done = status_area_clean == 'PAID'
@@ -547,8 +544,6 @@ col_status_sap = 'StatusSAP'
 col_net_amt = 'NET AMOUNT'
 
 if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and col_net_amt in df_inv_reg.columns:
-    df_inv_reg[col_net_amt] = pd.to_numeric(df_inv_reg[col_net_amt], errors='coerce').fillna(0)
-    
     target_order = [
         "R03_Jakarta Banten",
         "R12_Eastern Jabotabek",
@@ -659,15 +654,6 @@ st.subheader("📊 Process Reimbursement Summary")
 
 def generate_reimbursement_summary_table(df):
     df_calc = df.copy()
-
-    num_cols = ['NET AMOUNT', 'Amount SAP', 'Amount Paid Based on Setoff Data', 'Amount Paid']
-    for col in num_cols:
-        if col == 'Amount Paid' and col not in df_calc.columns and 'Amount Actual Paid' in df_calc.columns:
-            df_calc['Amount Paid'] = pd.to_numeric(df_calc['Amount Actual Paid'], errors='coerce').fillna(0)
-        elif col in df_calc.columns:
-            df_calc[col] = pd.to_numeric(df_calc[col], errors='coerce').fillna(0)
-        else:
-            df_calc[col] = 0
 
     col_status_sap = 'StatusSAP' if 'StatusSAP' in df_calc.columns else ('Status SAP' if 'Status SAP' in df_calc.columns else None)
     if col_status_sap:
