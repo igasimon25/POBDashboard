@@ -37,7 +37,7 @@ def load_data():
             column_mapping[col] = 'NET AMOUNT'
         elif c_upper == 'INVOICE AMOUNT':
             column_mapping[col] = 'Invoice Amount'
-        elif 'STATUS REIMBURSE' in c_upper or 'STATUS REIMBURSEMENT' in c_upper:
+        elif c_upper in ['STATUS REIMBURSE ACTUAL', 'STATUS REIMBURSEMENT ACTUAL']:
             column_mapping[col] = 'Status Reimburse Actual'
         elif c_upper == 'INVOICE AGENT':
             column_mapping[col] = 'Invoice Agent'
@@ -49,21 +49,14 @@ def load_data():
     # 3. Hapus kolom duplikat SETELAH rename agar benar-benar unik
     df = df.loc[:, ~df.columns.duplicated(keep='first')].copy()
     
-    # 4. Cleaning khusus pembersihan teks mata uang (Rp, spasi, pemisah ribuan)
-    def clean_currency_to_float(series):
-        if isinstance(series, pd.DataFrame):
-            series = series.iloc[:, 0]
-        return (
-            series.astype(str)
-            .str.replace(r'[^0-9.-]', '', regex=True)
-            .replace('', '0')
-        )
-
+    # 4. Cleaning & konversi awal kolom numerik ke Series 1D aman
     numeric_cols = ['Invoice Amount', 'NET AMOUNT', 'Amount SAP', 'Amount Paid Based on Setoff Data', 'Amount Actual Paid', 'Amount Paid']
     for ncol in numeric_cols:
         if ncol in df.columns:
-            cleaned_series = clean_currency_to_float(df[ncol])
-            df[ncol] = pd.to_numeric(cleaned_series, errors='coerce').fillna(0)
+            col_data = df[ncol]
+            if isinstance(col_data, pd.DataFrame):
+                col_data = col_data.iloc[:, 0]
+            df[ncol] = pd.to_numeric(col_data, errors='coerce').fillna(0)
 
     # Cleaning isi kolom Area
     if 'Area' in df.columns:
@@ -162,6 +155,7 @@ def create_compact_donut_card(title, paid_val, ny_val, color_done='#558B2F', col
     </div>
     """, unsafe_allow_html=True)
 
+
 # ==========================================
 # 4. 5 CHART KPI SEJAJAR HORIZONTAL
 # ==========================================
@@ -180,7 +174,7 @@ with col1:
     df_c1 = df_filtered.copy()
     col_status, col_amt = 'Status', 'Invoice Amount'
     if col_status in df_c1.columns and col_amt in df_c1.columns:
-        mask_paid = df_c1[col_status].astype(str).str.upper().str.strip().str.contains('PAID', na=False)
+        mask_paid = df_c1[col_status].astype(str).str.upper().str.strip() == 'PAID'
         val_payout_bm = df_c1[mask_paid][col_amt].sum()
         ny_val = df_c1[~mask_paid][col_amt].sum()
         create_compact_donut_card("Total Payout to BM", val_payout_bm, ny_val, element_key="kpi_payout_bm")
@@ -192,7 +186,7 @@ with col2:
     df_c2 = df_filtered.copy()
     col_status, col_amt = 'Status', 'NET AMOUNT'
     if col_status in df_c2.columns and col_amt in df_c2.columns:
-        mask_paid = df_c2[col_status].astype(str).str.upper().str.strip().str.contains('PAID', na=False)
+        mask_paid = df_c2[col_status].astype(str).str.upper().str.strip() == 'PAID'
         val_huawei_agent = df_c2[mask_paid][col_amt].sum()
         ny_val = df_c2[~mask_paid][col_amt].sum()
         create_compact_donut_card("Huawei To Agent", val_huawei_agent, ny_val, element_key="kpi_huawei_agent")
@@ -204,9 +198,9 @@ with col3:
     df_c3 = df_filtered.copy()
     col_status, col_amt, col_inv = 'Status', 'NET AMOUNT', 'Invoice Agent'
     if col_inv in df_c3.columns:
-        df_c3 = df_c3[df_c3[col_inv].astype(str).str.upper().str.strip().str.contains('DONE', na=False)]
+        df_c3 = df_c3[df_c3[col_inv].astype(str).str.upper().str.strip() == 'INVOICE DONE']
     if col_status in df_c3.columns and col_amt in df_c3.columns:
-        mask_paid = df_c3[col_status].astype(str).str.upper().str.strip().str.contains('PAID', na=False)
+        mask_paid = df_c3[col_status].astype(str).str.upper().str.strip() == 'PAID'
         val_agent_tsel = df_c3[mask_paid][col_amt].sum()
         ny_val = df_c3[~mask_paid][col_amt].sum()
         create_compact_donut_card("Agent To Telkomsel", val_agent_tsel, ny_val, element_key="kpi_agent_tsel")
@@ -219,7 +213,7 @@ with col4:
     col_status, col_amt = 'Status Reimburse Actual', 'NET AMOUNT'
     if col_status in df_c4.columns and col_amt in df_c4.columns:
         status_clean = df_c4[col_status].astype(str).str.upper().str.strip()
-        mask_done = status_clean.str.contains('PAID|DN ISSUED', regex=True, na=False)
+        mask_done = status_clean.isin(['PAID', 'DN ISSUED'])
         val_dn_issued = df_c4[mask_done][col_amt].sum()
         ny_val = df_c4[~mask_done][col_amt].sum()
         create_compact_donut_card("DN Issued", val_dn_issued, ny_val, element_key="kpi_dn_issued")
@@ -232,9 +226,9 @@ with col5:
     col_status, col_amt = 'Status Reimburse Actual', 'NET AMOUNT'
     if col_status in df_c5.columns and col_amt in df_c5.columns:
         status_clean = df_c5[col_status].astype(str).str.upper().str.strip()
-        mask_paid = status_clean.str.contains('PAID', na=False)
+        mask_paid = status_clean == 'PAID'
         val_payin_huawei = df_c5[mask_paid][col_amt].sum()
-        mask_ny = status_clean.str.contains('DN', na=False) & ~mask_paid
+        mask_ny = status_clean.isin(['DN ISSUED', 'NY ISSUE DN'])
         ny_val = df_c5[mask_ny][col_amt].sum()
         create_compact_donut_card("Total Pay In To Huawei", val_payin_huawei, ny_val, element_key="kpi_payin_huawei")
     else:
@@ -494,7 +488,7 @@ if 'Area' in df_filtered.columns:
             col_amt_payout = 'Invoice Amount' if 'Invoice Amount' in df_area.columns else 'NET AMOUNT'
             if 'Status' in df_area.columns and col_amt_payout in df_area.columns:
                 payout_series = df_area[col_amt_payout]
-                mask_payout_done = df_area['Status'].astype(str).str.upper().str.strip().str.contains('PAID', na=False)
+                mask_payout_done = df_area['Status'].astype(str).str.upper().str.strip() == 'PAID'
                 payout_done_bn = payout_series[mask_payout_done].sum() / 1_000_000_000
                 payout_ny_bn = payout_series[~mask_payout_done].sum() / 1_000_000_000
             else:
@@ -505,8 +499,8 @@ if 'Area' in df_filtered.columns:
                 payin_series = df_area[col_amt_payin]
                 status_area_clean = df_area['Status Reimburse Actual'].astype(str).str.upper().str.strip()
                 
-                mask_payin_done = status_area_clean.str.contains('PAID', na=False)
-                mask_payin_ny = status_area_clean.str.contains('DN', na=False) & ~mask_payin_done
+                mask_payin_done = status_area_clean == 'PAID'
+                mask_payin_ny = status_area_clean.isin(['DN ISSUED', 'NY ISSUE DN'])
                 
                 payin_done_bn = payin_series[mask_payin_done].sum() / 1_000_000_000
                 payin_ny_bn = payin_series[mask_payin_ny].sum() / 1_000_000_000
@@ -543,7 +537,7 @@ if col_inv_agent in df_raw.columns:
     selected_inv_agent = st.selectbox("Filter Invoice Agent", options=list_inv_agent, index=0)
     
     if selected_inv_agent != "(All)":
-        df_inv_reg = df_inv_reg[df_inv_reg[col_inv_agent].astype(str).str.upper().str.strip().str.contains(selected_inv_agent.upper().strip(), na=False)]
+        df_inv_reg = df_inv_reg[df_inv_reg[col_inv_agent].astype(str).str.upper().str.strip() == selected_inv_agent.upper().strip()]
 
 col_reg = 'new regional'
 col_status_sap = 'StatusSAP'
@@ -599,7 +593,7 @@ if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and co
             df_reg = df_inv_reg[df_inv_reg[col_reg].astype(str) == reg_name]
             status_sap_clean = df_reg[col_status_sap].astype(str).str.upper().str.strip()
             
-            mask_done = status_sap_clean.str.contains('CLEAR|PAID', regex=True, na=False)
+            mask_done = status_sap_clean.isin(['CLEARED', 'PAID', 'CLEARED/PAID'])
             done_val = df_reg[mask_done][col_net_amt].sum()
             done_m = done_val / 1_000_000_000
             
@@ -664,7 +658,7 @@ def generate_reimbursement_summary_table(df):
     col_status_sap = 'StatusSAP' if 'StatusSAP' in df_calc.columns else ('Status SAP' if 'Status SAP' in df_calc.columns else None)
     if col_status_sap:
         sap_status_clean = df_calc[col_status_sap].astype(str).str.upper().str.strip()
-        mask_sap_cleared = sap_status_clean.str.contains('CLEAR|PAID', regex=True, na=False)
+        mask_sap_cleared = sap_status_clean.isin(['CLEARED', 'PAID', 'CLEARED/PAID'])
         df_calc['Amount SAP Filtered'] = np.where(mask_sap_cleared, df_calc['Amount SAP'], 0)
     else:
         df_calc['Amount SAP Filtered'] = df_calc['Amount SAP']
