@@ -43,13 +43,19 @@ def load_data():
             column_mapping[col] = 'Invoice Agent'
         elif c_upper == 'STATUS':
             column_mapping[col] = 'Status'
+        elif 'VAT' in c_upper or 'PPN' in c_upper:
+            column_mapping[col] = 'VAT Amount'
+        elif 'MANAGEMENT FEE' in c_upper or 'MF' in c_upper:
+            column_mapping[col] = 'Management Fee'
+        elif 'REJECT' in c_upper:
+            column_mapping[col] = 'Rejection Reason'
             
     df = df.rename(columns=column_mapping)
     
-    # 3. Hapus kolom duplikat SETELAH rename agar benar-benar unik
+    # 3. Hapus kolom duplikat SETELAH rename
     df = df.loc[:, ~df.columns.duplicated(keep='first')].copy()
     
-    # 4. Cleaning khusus pembersihan teks mata uang (Rp, spasi, pemisah ribuan)
+    # 4. Cleaning khusus pembersihan teks mata uang
     def clean_currency_to_float(series):
         if isinstance(series, pd.DataFrame):
             series = series.iloc[:, 0]
@@ -59,7 +65,11 @@ def load_data():
             .replace('', '0')
         )
 
-    numeric_cols = ['Invoice Amount', 'NET AMOUNT', 'Amount SAP', 'Amount Paid Based on Setoff Data', 'Amount Actual Paid', 'Amount Paid']
+    numeric_cols = [
+        'Invoice Amount', 'NET AMOUNT', 'Amount SAP', 
+        'Amount Paid Based on Setoff Data', 'Amount Actual Paid', 
+        'Amount Paid', 'VAT Amount', 'Management Fee'
+    ]
     for ncol in numeric_cols:
         if ncol in df.columns:
             cleaned_series = clean_currency_to_float(df[ncol])
@@ -78,6 +88,17 @@ except Exception as e:
     st.stop()
 
 df_filtered = df_raw.copy()
+
+# ==========================================
+# FUNGSI HELPER FORMAT RUPIAH
+# ==========================================
+def fmt_rp(val):
+    if abs(val) < 1e-9:
+        return "Rp 0"
+    elif val < 0:
+        return f"-Rp {abs(val):,.0f}".replace(",", ".")
+    else:
+        return f"Rp {val:,.0f}".replace(",", ".")
 
 # ==========================================
 # 3. SIDEBAR CONTROL & GLOBAL FILTERS
@@ -175,7 +196,6 @@ val_agent_tsel = 0
 val_dn_issued = 0
 val_payin_huawei = 0
 
-# 1. Total Payout to BM
 with col1:
     df_c1 = df_filtered.copy()
     col_status, col_amt = 'Status', 'Invoice Amount'
@@ -187,7 +207,6 @@ with col1:
     else:
         st.warning("Kolom N/A")
 
-# 2. Huawei To Agent
 with col2:
     df_c2 = df_filtered.copy()
     col_status, col_amt = 'Status', 'NET AMOUNT'
@@ -199,7 +218,6 @@ with col2:
     else:
         st.warning("Kolom N/A")
 
-# 3. Agent To Telkomsel
 with col3:
     df_c3 = df_filtered.copy()
     col_status, col_amt, col_inv = 'Status', 'NET AMOUNT', 'Invoice Agent'
@@ -213,7 +231,6 @@ with col3:
     else:
         st.warning("Kolom N/A")
 
-# 4. DN Issued
 with col4:
     df_c4 = df_filtered.copy()
     col_status, col_amt = 'Status Reimburse Actual', 'NET AMOUNT'
@@ -226,7 +243,6 @@ with col4:
     else:
         st.warning("Kolom N/A")
 
-# 5. Total Pay In To Huawei
 with col5:
     df_c5 = df_filtered.copy()
     col_status, col_amt = 'Status Reimburse Actual', 'NET AMOUNT'
@@ -305,7 +321,7 @@ if col_status in df_filtered.columns and col_amount in df_filtered.columns:
     with col_layout:
         for status_item in target_statuses:
             amount_val = status_dict.get(status_item.upper().strip(), 0)
-            amount_str = f"Rp{amount_val:,.0f}".replace(",", ".") if amount_val > 0 else ("Rp0" if amount_val == 0 else "Rp-")
+            amount_str = fmt_rp(amount_val) if amount_val > 0 else ("Rp0" if amount_val == 0 else "Rp-")
 
             c1, c2 = st.columns([1.2, 2])
             with c1:
@@ -320,11 +336,11 @@ st.markdown("---")
 # ==========================================
 st.subheader("🔄 End-to-End Process Workflow & SLA")
 
-str_payout_bm = f"Rp{val_payout_bm:,.0f}".replace(",", ".") if val_payout_bm > 0 else "Rp0"
-str_huawei_agent = f"Rp{val_huawei_agent:,.0f}".replace(",", ".") if val_huawei_agent > 0 else "Rp0"
-str_agent_tsel = f"Rp{val_agent_tsel:,.0f}".replace(",", ".") if val_agent_tsel > 0 else "Rp0"
-str_dn_issued = f"Rp{val_dn_issued:,.0f}".replace(",", ".") if val_dn_issued > 0 else "Rp0"
-str_payin_huawei = f"Rp{val_payin_huawei:,.0f}".replace(",", ".") if val_payin_huawei > 0 else "Rp0"
+str_payout_bm = fmt_rp(val_payout_bm)
+str_huawei_agent = fmt_rp(val_huawei_agent)
+str_agent_tsel = fmt_rp(val_agent_tsel)
+str_dn_issued = fmt_rp(val_dn_issued)
+str_payin_huawei = fmt_rp(val_payin_huawei)
 
 html_content = f"""
 <!DOCTYPE html>
@@ -425,7 +441,162 @@ components.html(html_content, height=440, scrolling=False)
 st.markdown("---")
 
 # ==========================================
-# 7. PAYOUT & PAYIN BY AREA
+# 7. FITUR BARU 1: REIMBURSEMENT SUMMARY TO TSEL & AGENT
+# ==========================================
+st.subheader("📑 1. Reimbursement Summary to TSEL & Agent")
+
+col_tsel_1, col_tsel_2 = st.columns(2)
+
+with col_tsel_1:
+    st.markdown("#### **Summary to Telkomsel**")
+    if 'NET AMOUNT' in df_filtered.columns:
+        tsel_paid = df_filtered[df_filtered['Status'].astype(str).str.upper().str.contains('PAID', na=False)]['NET AMOUNT'].sum() if 'Status' in df_filtered.columns else 0
+        tsel_total = df_filtered['NET AMOUNT'].sum()
+        tsel_pending = tsel_total - tsel_paid
+        
+        st.metric("Total Submitted to TSEL", fmt_rp(tsel_total))
+        st.metric("Paid by TSEL", fmt_rp(tsel_paid))
+        st.metric("Pending TSEL", fmt_rp(tsel_pending))
+
+with col_tsel_2:
+    st.markdown("#### **Summary to Agent**")
+    if 'Invoice Amount' in df_filtered.columns:
+        agent_paid = df_filtered[df_filtered['Status'].astype(str).str.upper().str.contains('PAID', na=False)]['Invoice Amount'].sum() if 'Status' in df_filtered.columns else 0
+        agent_total = df_filtered['Invoice Amount'].sum()
+        agent_pending = agent_total - agent_paid
+        
+        st.metric("Total Submitted to Agent", fmt_rp(agent_total))
+        st.metric("Paid to Agent", fmt_rp(agent_paid))
+        st.metric("Pending Agent", fmt_rp(agent_pending))
+
+st.markdown("---")
+
+# ==========================================
+# 8. FITUR BARU 2: RISK VAT HUAWEI SUMMARY
+# ==========================================
+st.subheader("⚠️ 2. Risk VAT Huawei Summary")
+
+if 'VAT Amount' in df_filtered.columns:
+    col_vat1, col_vat2 = st.columns([1, 2])
+    
+    vat_total = df_filtered['VAT Amount'].sum()
+    
+    # Kriteria Risk VAT: misal VAT terdeteksi tapi status pembayaran masih pending
+    if 'Status' in df_filtered.columns:
+        mask_risk = ~df_filtered['Status'].astype(str).str.upper().str.contains('PAID', na=False) & (df_filtered['VAT Amount'] > 0)
+        vat_risk = df_filtered[mask_risk]['VAT Amount'].sum()
+        vat_safe = vat_total - vat_risk
+    else:
+        vat_risk = 0
+        vat_safe = vat_total
+
+    with col_vat1:
+        st.metric("Total Exposure VAT", fmt_rp(vat_total))
+        st.metric("VAT Safe (Paid)", fmt_rp(vat_safe))
+        st.metric("VAT Risk (Unpaid)", fmt_rp(vat_risk), delta_color="inverse")
+
+    with col_vat2:
+        fig_vat = go.Figure(data=[go.Pie(
+            labels=['Safe VAT', 'Risk VAT'],
+            values=[vat_safe, vat_risk],
+            marker=dict(colors=['#2ECC71', '#E74C3C']),
+            hole=0.5
+        )])
+        fig_vat.update_layout(height=220, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_vat, width="stretch", key="risk_vat_chart")
+else:
+    st.info("Kolom 'VAT Amount' / PPN tidak ditemukan dalam dataset.")
+
+st.markdown("---")
+
+# ==========================================
+# 9. FITUR BARU 3: MANAGEMENT FEE PROCESS
+# ==========================================
+st.subheader("💼 3. Management Fee Process")
+
+if 'Management Fee' in df_filtered.columns:
+    mf_total = df_filtered['Management Fee'].sum()
+    
+    if 'Status' in df_filtered.columns:
+        mask_mf_paid = df_filtered['Status'].astype(str).str.upper().str.contains('PAID', na=False)
+        mf_paid = df_filtered[mask_mf_paid]['Management Fee'].sum()
+        mf_unpaid = mf_total - mf_paid
+    else:
+        mf_paid = 0
+        mf_unpaid = mf_total
+
+    col_mf1, col_mf2, col_mf3 = st.columns(3)
+    col_mf1.metric("Total Management Fee", fmt_rp(mf_total))
+    col_mf2.metric("Management Fee Processed/Paid", fmt_rp(mf_paid))
+    col_mf3.metric("Management Fee Outstanding", fmt_rp(mf_unpaid))
+else:
+    st.info("Kolom 'Management Fee' tidak ditemukan dalam dataset.")
+
+st.markdown("---")
+
+# ==========================================
+# 10. FITUR BARU 4: REJECTION SAP
+# ==========================================
+st.subheader("🚫 4. Rejection SAP")
+
+col_status_sap_check = 'StatusSAP' if 'StatusSAP' in df_filtered.columns else ('Status SAP' if 'Status SAP' in df_filtered.columns else None)
+
+if col_status_sap_check:
+    df_rejected = df_filtered[df_filtered[col_status_sap_check].astype(str).str.upper().str.contains('REJECT', na=False)]
+    
+    col_rej1, col_rej2 = st.columns([1, 2])
+    
+    with col_rej1:
+        st.metric("Total Rejected SAP Invoices", f"{len(df_rejected)} Records")
+        if 'NET AMOUNT' in df_rejected.columns:
+            st.metric("Total Impacted Amount", fmt_rp(df_rejected['NET AMOUNT'].sum()))
+
+    with col_rej2:
+        if 'Rejection Reason' in df_rejected.columns and not df_rejected.empty:
+            rej_summary = df_rejected['Rejection Reason'].value_counts().reset_index()
+            rej_summary.columns = ['Alasan Rejection', 'Jumlah']
+            st.dataframe(rej_summary, use_container_width=True)
+        elif not df_rejected.empty:
+            cols_to_show = [col for col in ['new regional', 'Area', 'NET AMOUNT', col_status_sap_check] if col in df_rejected.columns]
+            st.dataframe(df_rejected[cols_to_show], use_container_width=True)
+        else:
+            st.success("TIDAK ADA DATA INVOICE REJECTED PADA SISTEM SAP.")
+else:
+    st.info("Kolom Status SAP tidak ditemukan untuk mengecek data Rejection.")
+
+st.markdown("---")
+
+# ==========================================
+# 11. FITUR BARU 5: STATUS TRACKING INVOICE BM
+# ==========================================
+st.subheader("📍 5. Status Tracking Invoice BM")
+
+col_status_bm = 'Status' if 'Status' in df_filtered.columns else None
+
+if col_status_bm:
+    tracking_summary = df_filtered.groupby(col_status_bm).agg(
+        Total_Invoice=('Invoice Amount', 'count'),
+        Total_Nominal=('Invoice Amount', 'sum')
+    ).reset_index()
+
+    tracking_summary['Total_Nominal_Fmt'] = tracking_summary['Total_Nominal'].apply(fmt_rp)
+
+    st.dataframe(
+        tracking_summary[[col_status_bm, 'Total_Invoice', 'Total_Nominal_Fmt']],
+        column_config={
+            col_status_bm: "Status Invoice BM",
+            "Total_Invoice": "Jumlah Invoice",
+            "Total_Nominal_Fmt": "Total Nominal"
+        },
+        use_container_width=True
+    )
+else:
+    st.info("Kolom Status Invoice BM tidak ditemukan.")
+
+st.markdown("---")
+
+# ==========================================
+# 12. PAYOUT & PAYIN BY AREA
 # ==========================================
 st.subheader("📊 Payout (Bn IDR) & Payin (Bn IDR)")
 
@@ -523,13 +694,11 @@ if 'Area' in df_filtered.columns:
             st.markdown("<br>", unsafe_allow_html=True)
             
         st.markdown("</div>", unsafe_allow_html=True)
-else:
-    st.warning("Kolom 'Area' tidak ditemukan pada dataset.")
 
 st.markdown("---")
 
 # ==========================================
-# 8. INVOICE REGIONAL (INVOICE PROCESS)
+# 13. INVOICE REGIONAL (INVOICE PROCESS)
 # ==========================================
 st.subheader("📊 Invoice Process (Invoice Regional)")
 
@@ -648,13 +817,11 @@ if col_reg in df_inv_reg.columns and col_status_sap in df_inv_reg.columns and co
                 st.markdown("<br>", unsafe_allow_html=True)
                 
         st.markdown("</div>", unsafe_allow_html=True)
-else:
-    st.warning("Kolom 'new regional', 'StatusSAP', atau 'NET AMOUNT' tidak ditemukan dalam dataset.")
 
 st.markdown("---")
 
 # ==========================================
-# 9. PROCESS REIMBURSEMENT SUMMARY TABLE
+# 14. PROCESS REIMBURSEMENT SUMMARY TABLE
 # ==========================================
 st.subheader("📊 Process Reimbursement Summary")
 
@@ -706,14 +873,6 @@ def generate_reimbursement_summary_table(df):
 df_summary_raw, col_month_name = generate_reimbursement_summary_table(df_filtered)
 
 if not df_summary_raw.empty:
-    def fmt_rp(val):
-        if abs(val) < 1e-9:
-            return "Rp -"
-        elif val < 0:
-            return f"-Rp {abs(val):,.0f}".replace(",", ".")
-        else:
-            return f"Rp {val:,.0f}".replace(",", ".")
-
     rows_html = ""
     for idx, row in df_summary_raw.iterrows():
         val_m = row[col_month_name]
@@ -759,7 +918,7 @@ if not df_summary_raw.empty:
                 <th>Payment Month</th>
                 <th>NET AMOUNT</th>
                 <th>Amount SAP</th>
-                <th>Amount Paid Setoff</th>
+                <th>Amount Paid Based on Setoff Data</th>
                 <th>Amount Paid</th>
                 <th>GAP</th>
             </tr>
